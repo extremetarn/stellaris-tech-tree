@@ -152,7 +152,7 @@
     min-width: 0;
 }
 
-.stt-dialog .stt-search input {
+.stt-dialog .stt-search > input {
     width: 100%;
     min-width: 0;
     margin: 0;
@@ -160,7 +160,7 @@
     appearance: none;
 }
 
-.stt-search input::placeholder {
+.stt-search > input::placeholder {
     color: #a3b5cc;
 }
 
@@ -780,7 +780,7 @@
         grid-row: 2;
     }
 
-    .stt-search input {
+    .stt-search > input {
         min-height: 43px;
         font-size: 16px !important;
     }

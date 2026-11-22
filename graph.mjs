@@ -7,6 +7,8 @@ const COLORS = {
 };
 const CARD_WIDTH = 148;
 const CARD_HEIGHT = 54;
+const ROW_STEP = CARD_HEIGHT + 22;
+const CHECKBOX_SIZE = 20;
 
 const STYLE = [
     {
@@ -16,7 +18,7 @@ const STYLE = [
             label: 'data(label)', 'font-family': 'system-ui, sans-serif',
             'font-size': 14, 'font-weight': 600, color: '#bed0e2',
             'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'wrap',
-            'text-max-width': 130, 'line-height': 1.16,
+            'text-max-width': 108, 'text-margin-x': 13, 'line-height': 1.16,
             'background-color': '#142132', 'border-width': 1, 'border-color': '#3a4b64',
         },
     },
@@ -34,7 +36,7 @@ const STYLE = [
     { selector: 'node.neighbor', style: { color: '#f0f7ff', 'border-color': '#819cbb', 'border-width': 2 } },
     { selector: 'node.column, node.lane', style: {
         width: 180, height: 30, 'background-opacity': 0, 'border-width': 0,
-        'text-max-width': 180, 'font-size': 13, 'font-weight': 700, color: '#8ca7c4',
+        'text-max-width': 180, 'text-margin-x': 0, 'font-size': 13, 'font-weight': 700, color: '#8ca7c4',
         events: 'no',
     } },
     { selector: 'node.lane', style: { width: 104, 'text-max-width': 104, color: 'data(accent)' } },
@@ -75,17 +77,29 @@ function coordinates(nodes, view) {
     }
     const nodesWithCoordinates = [];
     const headings = [];
-    const lanes = new Map([['P', 115], ['S', 320], ['E', 525], ['M', 730]]);
+    const lanes = new Map();
+    if (view === 'INTRO') {
+        const rowsByField = new Map([['P', 0], ['S', 0], ['E', 0], ['M', 0]]);
+        for (const list of groups.values()) {
+            const { field } = list[0];
+            rowsByField.set(field, Math.max(rowsByField.get(field) ?? 0, list.length));
+        }
+        let y = 115;
+        for (const [field, rows] of rowsByField) {
+            lanes.set(field, y);
+            y += Math.max(205, rows * ROW_STEP);
+        }
+    }
     for (const [key, list] of groups) {
         const rank = rankOf(list[0]);
         const x = rank * (view === 'INTRO' ? 205 : 232) + (view === 'INTRO' ? 215 : 100);
-        const lane = view === 'INTRO' ? (lanes.get(list[0].field) ?? 730) : 108;
+        const lane = lanes.get(list[0].field) ?? 108;
         let groupStart = 0;
         list.forEach((node, index) => {
             if (view !== 'INTRO' && index && node.group && node.group !== list[index - 1].group && list.length > 12) {
                 groupStart += 9;
             }
-            nodesWithCoordinates.push({ node, x, y: lane + index * 76 + groupStart });
+            nodesWithCoordinates.push({ node, x, y: lane + index * ROW_STEP + groupStart });
         });
         if (key === String(rank) && ['P', 'S', 'E'].includes(view)) {
             headings.push({ id: 'heading-' + rank, label: 'T' + rank, x, y: 39, cls: 'column' });
@@ -120,7 +134,7 @@ export function createGraph(container, overlay, onSelect, createCheckbox) {
             const width = container.clientWidth;
             const height = container.clientHeight;
             const zoom = cy.zoom();
-            const size = Math.min(24, CARD_HEIGHT * zoom / 2, Math.max(22, 20 * zoom));
+            const size = Math.min(24, CHECKBOX_SIZE * zoom);
             overlay.style.setProperty('--stt-node-check-size', size + 'px');
             for (const [id, checkbox] of checkboxes) {
                 const { x, y } = cy.getElementById(id).renderedPosition();
