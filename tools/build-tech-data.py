@@ -12,7 +12,6 @@ GRAPH_HEADER = "ID\t名称\t阶位/类型\t前置式"
 TOKEN = r"[A-Za-z0-9_-]+"
 WORLD_REQUIREMENTS = {
     "配适": "相应专用配适方案",
-    "介质接口": "相应独立介质接口",
 }
 RESEARCH_CONDITION_PREFIXES = ("专项获取：", "起研条件：")
 # The graph column also contains specifications, deployment notes and optional variants.
@@ -20,14 +19,12 @@ RESEARCH_CONDITION_PREFIXES = ("专项获取：", "起研条件：")
 RESEARCH_GATE_NOTES = {
     "gateway_activation",
     "dark_matter_power_core",
-    "ME-24", "ME-25", "ME-26", "ME-28", "ME-30",
-    "ME-34", "ME-36", "ME-37", "ME-39",
+    "ME-28", "ME-30", "ME-34", "ME-36", "ME-37",
     "prosperous_unification",
 }
 RESEARCH_GATE_CLAUSES = {
     "ME-31": "原物料容器和检测科技",
     "ME-33": "对应船体、舰载供电与维修设施",
-    "ME-38": "具体虚境项目",
     "neutronium_gigaforge": "银河奇迹为科研入口",
 }
 ROUTES = {
