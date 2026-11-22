@@ -100,10 +100,11 @@ export function evaluate(node, catalog, state) {
     const tier = node.tierGate === null ? null : {
         level: node.tierGate,
         count: (catalog.tierNodes.get(node.field + node.tierGate) ?? []).filter(completed).length,
+        required: 6,
     };
     const ready = groups.every(group => group.some(option => option.done))
         && conditions.every(condition => condition.done)
-        && (!tier || tier.count >= 6);
+        && (!tier || tier.count >= tier.required);
     let status = ready ? 'ready' : 'locked';
     if (node.field === 'A') status = 'reference';
     else if (node.derivedFrom) status = completed(node.id) ? 'achieved' : 'locked';
@@ -165,18 +166,59 @@ export function toggle(list, value) {
     return list.includes(value) ? list.filter(item => item !== value) : [...list, value];
 }
 
-export function draftFor(item, kind, catalog) {
+function prerequisiteDraft(target, catalog, state) {
+    const upstream = new Map();
+    const seen = new Set([target.id]);
+    const label = node => '「' + node.name + '」〔' + node.id + '〕';
+
+    function inspect(node) {
+        const { groups, conditions, tier } = evaluate(node, catalog, state);
+        const missing = [];
+        for (const group of groups) {
+            if (group.some(option => option.done)) continue;
+            const options = group.map(option => {
+                if (!option.id) return '确认条件「' + option.external + '」';
+                const dependency = catalog.nodes.get(option.id);
+                if (!seen.has(dependency.id)) {
+                    seen.add(dependency.id);
+                    const blockers = inspect(dependency);
+                    upstream.set(dependency.id, '- ' + label(dependency) + '｜'
+                        + (blockers.length ? blockers.join('。') : '自身前置均已满足') + '。');
+                }
+                return '掌握' + label(dependency);
+            });
+            missing.push(options.length === 1 ? options[0] : '任选一项（' + options.join(' 或 ') + '）');
+        }
+        for (const condition of conditions) {
+            if (!condition.done) missing.push('确认「' + condition.label.replace(/。$/, '') + '」');
+        }
+        if (tier && tier.count < tier.required) {
+            missing.push(FIELD_NAMES[node.field] + ' T' + tier.level + ' 已掌握 ' + tier.count + '/' + tier.required
+                + ' 项，还差 ' + (tier.required - tier.count) + ' 项同阶科技');
+        }
+        return missing;
+    }
+
+    const missing = inspect(target);
+    if (!missing.length) return '所有前置均已满足。';
+
+    const lines = ['目标节点还缺以下前置与条件。', ...missing.map(value => '- ' + value + '。')];
+    if (upstream.size) {
+        lines.push('未掌握的上游节点按研究顺序列在下方。任选组按所选分支推进。', ...upstream.values());
+    }
+    return lines.join('\n');
+}
+
+export function draftFor(item, kind, catalog, state) {
     const name = '「' + item.name + '」';
     if (kind === 'route') return '灰风，准备规划' + name + '的文明飞升路线。先核对目标文明的资格、当前转型阶段和下一步要完成的工程。';
     if (kind === 'perk') return '灰风，帮我核对飞升天赋' + name + '的采纳条件和它对当前文明的影响。';
-    if (item.field === 'A' || item.field === 'M') return '灰风，帮我核对' + name + (item.field === 'M' ? '里程碑的达成条件和当前进度。' : '的档案。');
-    const opening = kind === 'node' && item.field === 'G' ? '灰风，准备规划' + name + '巨构专项。' : '灰风，准备立项研究' + name + '。';
-    const prerequisitesText = item.requires.map(group => {
-        const names = group.map(option => '「' + (catalog.nodes.get(option.id)?.name ?? option.external) + '」');
-        return names.length > 1 ? '（' + names.join('或') + '）' : names[0];
-    }).join('、');
-    return opening + (prerequisitesText ? '先核对前置' + prerequisitesText + '及其他立项条件，再告诉我还有哪些缺项。'
-        : '先核对当前科研和工业条件，再告诉我能否立项。');
+    if (item.field === 'A') return '灰风，帮我核对' + name + '的档案。';
+    const opening = {
+        G: '灰风，准备规划' + name + '巨构专项。',
+        M: '灰风，接下来处理' + name + '里程碑。',
+    }[item.field] ?? ('灰风，准备立项研究' + name + '。');
+    return opening + '\n' + prerequisiteDraft(item, catalog, state);
 }
 
 export function appendDraft(existing, draft) {

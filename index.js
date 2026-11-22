@@ -504,7 +504,12 @@ function fillDraft(item, kind) {
         notice('酒馆输入框目前不可编辑。打开一段聊天后可以填入。', 8000);
         return;
     }
-    input.value = appendDraft(input.value, draftFor(item, kind, dataCatalog));
+    const { key } = getConversation();
+    if (key !== chatKey) {
+        syncConversation();
+        if (key !== chatKey) return;
+    }
+    input.value = appendDraft(input.value, draftFor(item, kind, dataCatalog, progress));
     input.dispatchEvent(new Event('input', { bubbles: true }));
     dialog.close('draft');
     input.focus();
@@ -536,10 +541,10 @@ function renderTech(node) {
             needs.append(row);
         }
         if (state.tier) {
-            const count = state.tier.count;
-            const line = (count >= 6 ? '✓ ' : '○ ') + FIELD_NAMES[node.field] + ' T' + state.tier.level + ' 累计 ' + count + ' / 6 项';
+            const { level, count, required } = state.tier;
+            const line = (count >= required ? '✓ ' : '○ ') + FIELD_NAMES[node.field] + ' T' + level + ' 累计 ' + count + ' / ' + required + ' 项';
             const label = element('p', line, 'stt-tier-check');
-            if (count >= 6) label.classList.add('is-done');
+            if (count >= required) label.classList.add('is-done');
             needs.append(label);
         }
         for (const condition of state.conditions) needs.append(conditionButton(condition.label, condition.key, condition.done));
