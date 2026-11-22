@@ -1,0 +1,11 @@
+{
+  "display_name": "群星科研台",
+  "loading_order": 90,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "沐沐",
+  "version": "0.1.1",
+  "auto_update": false
+}
