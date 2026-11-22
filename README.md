@@ -1,6 +1,6 @@
 # 群星科研台 v0.1.11
 
-SillyTavern 前端扩展。内置《群星系统》V3.6 科技图，包含 760 个节点、信息时代起步图、ME 的 48 项科技、巨构专项、文明飞升路线和飞升天赋。
+SillyTavern 前端扩展。内置《群星系统》V4.0 科技图，包含 761 个节点、信息时代起步图、ME 的 48 项科技、巨构专项、文明飞升路线和飞升天赋。
 
 ## 本地安装
 
@@ -25,7 +25,7 @@ SillyTavern 前端扩展。内置《群星系统》V3.6 科技图，包含 760 �
 用 Python 3.9 或以上版本，在扩展目录运行：
 
 ```sh
-python3 tools/build-tech-data.py /path/to/Stellaris_System_V3.6_Tech_Tree_Overview.json
+python3 tools/build-tech-data.py /path/to/Stellaris_System_V4.0_Tech_Tree_Overview.json
 ```
 
 脚本读取世界书的带标签科技表和档案，重新生成 `data/tech-tree.json`。保留科技 ID 可以让旧进度继续对应。图形组件 Cytoscape.js 3.33.1 随包提供，其许可文件位于 `vendor/`。
