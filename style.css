@@ -333,14 +333,59 @@
 }
 
 .stt-dialog .stt-batch-check {
+    appearance: none;
+    display: grid;
+    grid-template: 100% / 100%;
+    place-items: center;
     width: 17px;
     height: 17px;
     min-width: 0;
     min-height: 0;
     margin: 0;
     padding: 0;
-    accent-color: #75b9e8;
+    border: 1px solid rgb(181 213 241 / 36%);
+    border-radius: 24%;
+    outline: none;
+    background: rgb(13 26 42 / 16%);
+    box-shadow: none;
+    filter: none;
+    transform: none;
     cursor: pointer;
+}
+
+.stt-dialog .stt-batch-check::before {
+    content: '';
+    width: 76%;
+    height: 76%;
+    background: #d8efff;
+    box-shadow: none;
+    clip-path: polygon(6% 52%, 20% 38%, 40% 59%, 81% 14%, 96% 29%, 40% 89%);
+    opacity: 0;
+    transform: none;
+}
+
+.stt-dialog .stt-batch-check:is(:hover, :focus-visible) {
+    border-color: rgb(181 213 241 / 76%);
+    background: rgb(117 185 232 / 16%);
+}
+
+.stt-dialog .stt-batch-check:checked {
+    border-color: rgb(149 209 255 / 76%);
+    background: rgb(117 185 232 / 35%);
+}
+
+.stt-dialog .stt-batch-check:checked::before {
+    opacity: 1;
+}
+
+@media (forced-colors: active) {
+    .stt-dialog .stt-batch-check {
+        appearance: auto;
+    }
+
+    .stt-dialog .stt-batch-check::before {
+        content: none;
+    }
 }
 
 .stt-graph-checks .stt-batch-check {
