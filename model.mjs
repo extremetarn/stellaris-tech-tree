@@ -83,6 +83,8 @@ export function externalKey(option) {
 }
 
 export function conditionKey(node, condition) {
+    // Keep confirmations saved when the full graph note was one checkbox.
+    if (node.note?.includes('；') && node.note.includes(condition)) return node.id + ':' + node.note;
     return node.id + ':' + condition;
 }
 
@@ -177,8 +179,8 @@ const requirementWording = new Map([
     ['当地存在Ars式Source', '当地有可用的源质'],
     ['当地已有经验证的ProjectE式等价交换', '当地有经过验证的等价交换工艺'],
     ['对应飞升或宿主世界的意识载体', '具备适用于相关飞升路线或本宇宙的意识载体'],
-    ['配适=相应专用配适方案；另需原物料容器和检测科技', '备妥原物料容器，并具备必要的检测技术'],
-    ['介质接口=相应独立接口；另需具体虚境项目', '落实相应的虚境项目'],
+    ['原物料容器和检测科技', '备妥原物料容器，并具备必要的检测技术'],
+    ['具体虚境项目', '落实相应的虚境项目'],
     ['文明里程碑。政体统一与公共服务实际覆盖均达到后登记', '完成政体统一，并达到公共服务覆盖要求'],
 ]);
 

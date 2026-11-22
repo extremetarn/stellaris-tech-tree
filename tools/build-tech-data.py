@@ -14,14 +14,22 @@ WORLD_REQUIREMENTS = {
     "配适": "相应专用配适方案",
     "介质接口": "相应独立介质接口",
 }
-REFERENCE_NOTES = (
-    "超出本地覆盖另需",
-    "信息时代起研",
-    "群星系统 T0 主推进器额定巡航速度",
-    "T0 推进器额定巡航速度",
-    "首次已掌握触发",
-    "查询档案",
-)
+RESEARCH_CONDITION_PREFIXES = ("专项获取：", "起研条件：")
+# The graph column also contains specifications, deployment notes and optional variants.
+# These unlabelled notes are actual prerequisites in the matching project descriptions.
+RESEARCH_GATE_NOTES = {
+    "gateway_activation",
+    "dark_matter_power_core",
+    "ME-24", "ME-25", "ME-26", "ME-28", "ME-30",
+    "ME-34", "ME-36", "ME-37", "ME-39",
+    "prosperous_unification",
+}
+RESEARCH_GATE_CLAUSES = {
+    "ME-31": "原物料容器和检测科技",
+    "ME-33": "对应船体、舰载供电与维修设施",
+    "ME-38": "具体虚境项目",
+    "neutronium_gigaforge": "银河奇迹为科研入口",
+}
 ROUTES = {
     "ASC-GEN": ("基因飞升", None, ("ap_engineered_evolution",),
                 ("适用人口与基因工程", "推进生体演化三阶段局势", "形成基因主传统与人口模板")),
@@ -149,11 +157,11 @@ def build(path):
         tier = int(rank[1]) if field in "PSE" else None
         lines = details.get(node_id, giant_by_name.get(name, []) if field == "G" else [])
         external_note = notes[0] if notes and notes[0] != "—" else ""
-        requirements = [
-            line for line in lines if line.startswith(("专项获取：", "起研条件："))
-        ]
-        if external_note and not external_note.startswith(REFERENCE_NOTES):
+        requirements = [line for line in lines if line.startswith(RESEARCH_CONDITION_PREFIXES)]
+        if external_note and (node_id in RESEARCH_GATE_NOTES or external_note.startswith(RESEARCH_CONDITION_PREFIXES)):
             requirements.append(external_note)
+        if node_id in RESEARCH_GATE_CLAUSES:
+            requirements.append(RESEARCH_GATE_CLAUSES[node_id])
         flavor = next((line for line in lines if re.match(r"(科技|档案)释义：", line)), "")
         summary = flavor.partition("：")[2] or (lines[1] if len(lines) > 1 else "")
         group = next((line.split(" · ")[1] for line in lines if re.match(r"^(物理学|社会学|工程学) · ", line)), "")
