@@ -167,7 +167,7 @@ export function toggle(list, value) {
 }
 
 const readyForResearch = '所有前置均已满足。';
-const projectName = item => '「' + item.name + '」';
+const projectName = item => '「' + item.name + '」' + (/^ME-\d+$/.test(item.id) ? '〔' + item.id + '〕' : '');
 const requirementWording = new Map([
     ['专项获取：不按常规科技抽取，核对事件、遗物、残骸、危机或路线授予。', '通过相关发现、遗物、残骸、危机或专项研究授权取得所需资料'],
     ['普通休眠星门、适用发现事件或本系统等效验证', '找到合适的休眠星门、取得相关新发现，或完成等效验证'],
@@ -236,33 +236,29 @@ function appendUpstream(lines, inspections, targets) {
     }
 }
 
-function prerequisiteDraft(target, catalog, state) {
-    const inspections = inspectPrerequisites([target], catalog, state);
-    const { missing } = inspections.get(target.id);
-    if (!missing.length) return readyForResearch;
-
-    const lines = ['开工前还须做好以下准备。', ...missing.map(value => '- ' + value + '。')];
-    appendUpstream(lines, inspections, [target]);
-    return lines.join('\n');
-}
-
 function researchProject(item, kind) {
     return kind === 'node' && item.field !== 'A';
 }
 
-function projectInstruction(item, kind) {
+function projectInstruction(item, kind, ready) {
     const name = projectName(item);
     if (kind === 'route') return '拟订' + name + '的飞升方案，说明我方资格、目前进展和下一步工程。';
     if (kind === 'perk') return '评估采纳' + name + '的条件，以及它会给我们带来哪些变化。';
     if (item.field === 'A') return '调阅' + name + '的研究档案。';
-    if (item.field === 'G') return '拟订' + name + '的工程计划。';
-    if (item.field === 'M') return '把' + name + '列入下一阶段的计划。';
-    return '把' + name + '列入研究计划。';
+    if (item.field === 'G') return (ready ? '立项开展' : '筹备') + name + '工程。';
+    if (item.field === 'M') return (ready ? '推进' : '筹备') + name + '。';
+    return ready ? '立项研究' + name + '。' : '筹备' + name + '的研究。';
 }
 
 export function draftFor(item, kind, catalog, state) {
-    const opening = '灰风，' + projectInstruction(item, kind);
-    return researchProject(item, kind) ? opening + '\n' + prerequisiteDraft(item, catalog, state) : opening;
+    if (!researchProject(item, kind)) return projectInstruction(item, kind);
+    const inspections = inspectPrerequisites([item], catalog, state);
+    const { missing } = inspections.get(item.id);
+    const lines = [projectInstruction(item, kind, !missing.length)];
+    if (!missing.length) lines.push(readyForResearch);
+    else lines.push('开工前还须完成以下准备。', ...missing.map(value => '- ' + value + '。'));
+    appendUpstream(lines, inspections, [item]);
+    return lines.join('\n');
 }
 
 export function draftForBatch(projects, catalog, state) {
@@ -273,17 +269,20 @@ export function draftForBatch(projects, catalog, state) {
     }
     const targets = projects.filter(({ item, kind }) => researchProject(item, kind)).map(({ item }) => item);
     const inspections = inspectPrerequisites(targets, catalog, state);
-    const lines = ['灰风，我准备这样安排下一轮科研。'];
+    const allReady = targets.length === projects.length
+        && targets.every(item => !inspections.get(item.id).missing.length);
+    const lines = [allReady ? '接下来同时立项推进以下项目。' : '接下来安排以下工作。'];
     for (const { item, kind } of projects) {
-        const instruction = '- ' + projectInstruction(item, kind);
         if (!researchProject(item, kind)) {
-            lines.push(instruction);
+            lines.push('- ' + projectInstruction(item, kind));
         } else {
             const { missing } = inspections.get(item.id);
-            lines.push(instruction + (missing.length ? '开工前还须做好以下准备。' : readyForResearch));
-            lines.push(...missing.map(value => '  - ' + value + '。'));
+            lines.push('- ' + projectInstruction(item, kind, !missing.length));
+            if (missing.length) lines.push(...missing.map(value => '  - ' + value + '。'));
+            else if (!allReady) lines.push('  - ' + readyForResearch);
         }
     }
+    if (allReady) lines.push('这些项目' + readyForResearch);
     appendUpstream(lines, inspections, targets);
     return lines.join('\n');
 }
