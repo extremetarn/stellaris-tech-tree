@@ -1,5 +1,5 @@
 import {
-    FIELD_NAMES, STATUS, STORAGE_KEY, VIEWS, appendDraft, connectedNodes, draftFor, evaluate,
+    FIELD_NAMES, STATUS, STORAGE_KEY, VIEWS, appendDraft, connectedNodes, draftForBatch, evaluate,
     externalKey, indexCatalog, newProfile, profileSets, restoreSettings, toggle, validateProfile,
 } from './model.mjs';
 import { createGraph } from './graph.mjs';
@@ -74,7 +74,10 @@ function buildShell() {
                             <button type="button" class="stt-fit" aria-label="适应图面">全览</button>
                         </div>
                     </div>
-                    <div class="stt-graph" aria-label="可拖动和缩放的科技图"></div>
+                    <div class="stt-graph-view">
+                        <div class="stt-graph" aria-label="可拖动和缩放的科技图"></div>
+                        <div class="stt-graph-checks" role="group" aria-label="勾选科技图节点"></div>
+                    </div>
                     <div class="stt-asc-page" hidden></div>
                     <footer class="stt-board-footer">
                         <span><i class="stt-dot is-learned"></i>已掌握</span>
@@ -92,6 +95,16 @@ function buildShell() {
                     <footer class="stt-detail-actions"></footer>
                 </aside>
             </div>
+            <footer class="stt-batch" aria-label="批量填入节点">
+                <div class="stt-batch-selection">
+                    <strong>已选节点 <span class="stt-batch-count" aria-live="polite">0</span></strong>
+                    <ul class="stt-batch-list" aria-label="已选节点列表"></ul>
+                </div>
+                <div class="stt-batch-actions">
+                    <button type="button" class="stt-batch-clear" disabled>清空</button>
+                    <button type="button" class="stt-primary stt-batch-fill" disabled>填入已选</button>
+                </div>
+            </footer>
         </div>`;
     document.body.append(dialog);
     return dialog;
@@ -116,6 +129,7 @@ let searchResults = [];
 let openingButton;
 let noteTimer;
 let elements;
+const batchProjects = new Map();
 
 function profile() {
     return settings.profiles.find(item => item.id === settings.activeId);
@@ -135,6 +149,10 @@ function syncConversation() {
     if (!dataCatalog) return;
     const { context, key } = getConversation();
     chatRevision++;
+    if (key !== chatKey) {
+        batchProjects.clear();
+        hideSearch(true);
+    }
     chatKey = key;
     clearTimeout(noteTimer);
     elements.alert.hidden = true;
@@ -148,6 +166,47 @@ function syncConversation() {
     }
     renderProfiles();
     refreshProgress();
+    renderBatch();
+}
+
+function updateBatch(item, kind, checked) {
+    const key = kind + ':' + item.id;
+    if (checked) batchProjects.set(key, { item, kind });
+    else batchProjects.delete(key);
+    renderBatch();
+}
+
+function batchCheckbox(item, kind) {
+    const checkbox = element('input', '', 'stt-batch-check');
+    checkbox.type = 'checkbox';
+    checkbox.dataset.batchKey = kind + ':' + item.id;
+    checkbox.checked = batchProjects.has(checkbox.dataset.batchKey);
+    checkbox.setAttribute('aria-label', '勾选' + item.name);
+    checkbox.title = '勾选' + item.name;
+    checkbox.addEventListener('change', () => updateBatch(item, kind, checkbox.checked));
+    return checkbox;
+}
+
+function renderBatch() {
+    elements.batchCount.textContent = String(batchProjects.size);
+    elements.batchClear.disabled = !batchProjects.size;
+    elements.batchFill.disabled = !batchProjects.size;
+    const list = elements.batchList;
+    const scroll = list.scrollLeft;
+    list.replaceChildren(...[...batchProjects.values()].map(({ item, kind }) => {
+        const entry = element('li', '', 'stt-batch-chip');
+        const name = button(item.name, () => {
+            if (kind === 'node') selectTech(item.id, true);
+            else selectAscension(item.id, kind);
+        }, 'stt-batch-name');
+        const remove = iconButton('×', '移除' + item.name, () => updateBatch(item, kind, false));
+        entry.append(name, remove);
+        return entry;
+    }));
+    list.scrollLeft = scroll;
+    for (const checkbox of dialog.querySelectorAll('input.stt-batch-check')) {
+        checkbox.checked = batchProjects.has(checkbox.dataset.batchKey);
+    }
 }
 
 function editConversation(update) {
@@ -322,10 +381,12 @@ function renderSearch() {
     elements.results.hidden = !elements.search.value.trim();
     for (const result of searchResults) {
         const row = button('', () => chooseSearch(result), 'stt-search-hit');
+        const hit = element('div', '', 'stt-search-choice');
         const name = result.item.field === 'ME' ? result.item.id + ' · ' + result.item.name : result.item.name;
         const descriptor = result.kind === 'node' ? (FIELD_NAMES[result.item.field] ?? '') : result.kind === 'route' ? '飞升路线' : '飞升天赋';
         row.append(element('strong', name), element('span', descriptor + ' · ' + result.item.id));
-        elements.results.append(row);
+        hit.append(batchCheckbox(result.item, result.kind), row);
+        elements.results.append(hit);
     }
     if (!searchResults.length) elements.results.append(element('p', '没有匹配的档案。', 'stt-empty'));
 }
@@ -395,7 +456,7 @@ function renderView() {
     renderTabs();
     renderBoardHeader(nodes);
     elements.tier.hidden = !['P', 'S', 'E'].includes(view);
-    elements.graph.hidden = showingAscension;
+    elements.graphView.hidden = showingAscension;
     elements.graphActions.hidden = showingAscension;
     elements.graphLegend.hidden = showingAscension;
     elements.ascension.hidden = !showingAscension;
@@ -443,9 +504,11 @@ function renderAscension() {
         for (const perk of dataCatalog.perks.values()) {
             const saved = progress.perks.has(perk.id);
             const card = button('', () => selectAscension(perk.id, 'perk'), 'stt-asc-card');
+            const wrapper = element('div', '', 'stt-asc-choice');
             card.append(element('strong', perk.name), element('span', saved ? '已采纳' : perk.type));
             pressed(card, selection?.id === perk.id);
-            grid.append(card);
+            wrapper.append(batchCheckbox(perk, 'perk'), card);
+            grid.append(wrapper);
         }
         host.append(grid);
         return;
@@ -455,16 +518,20 @@ function renderAscension() {
         if (route.parent) continue;
         const article = element('article', '', 'stt-asc-family');
         const main = button('', () => selectAscension(route.id, 'route'), 'stt-asc-card');
+        const wrapper = element('div', '', 'stt-asc-choice');
         const lvl = profile().stages[route.id] ?? 0;
         main.append(element('strong', route.name), element('span', lvl ? STAGES[lvl - 1] + '已登记' : '待立项'));
         pressed(main, selection?.id === route.id);
-        article.append(main);
+        wrapper.append(batchCheckbox(route, 'route'), main);
+        article.append(wrapper);
         const sub = element('div', '', 'stt-subroutes');
         for (const child of dataCatalog.routes.values()) {
             if (child.parent !== route.id) continue;
             const branch = button(child.name, () => selectAscension(child.id, 'route'));
+            const choice = element('div', '', 'stt-subroute-choice');
             pressed(branch, selection?.id === child.id);
-            sub.append(branch);
+            choice.append(batchCheckbox(child, 'route'), branch);
+            sub.append(choice);
         }
         if (sub.childElementCount) article.append(sub);
         grid.append(article);
@@ -498,7 +565,7 @@ function conditionButton(label, key, done) {
     return el;
 }
 
-function fillDraft(item, kind) {
+function fillDraft(projects) {
     const input = document.querySelector('#send_textarea');
     if (!(input instanceof HTMLTextAreaElement) || input.disabled || input.readOnly) {
         notice('酒馆输入框目前不可编辑。打开一段聊天后可以填入。', 8000);
@@ -507,9 +574,12 @@ function fillDraft(item, kind) {
     const { key } = getConversation();
     if (key !== chatKey) {
         syncConversation();
-        if (key !== chatKey) return;
+        notice('当前会话已切换，请重新选择要填入的节点。');
+        return;
     }
-    input.value = appendDraft(input.value, draftFor(item, kind, dataCatalog, progress));
+    const draft = draftForBatch(projects, dataCatalog, progress);
+    if (!draft) return;
+    input.value = appendDraft(input.value, draft);
     input.dispatchEvent(new Event('input', { bubbles: true }));
     dialog.close('draft');
     input.focus();
@@ -518,7 +588,7 @@ function fillDraft(item, kind) {
 }
 
 function draftButton(item, kind) {
-    return button('填入输入框', () => fillDraft(item, kind), 'stt-action stt-draft');
+    return button('填入输入框', () => fillDraft([{ item, kind }]), 'stt-action stt-draft');
 }
 
 function renderTech(node) {
@@ -658,10 +728,13 @@ function bindShell() {
         alert: find('.stt-alert'), search: find('.stt-search input'), results: find('.stt-results'),
         profileSelect: find('.stt-profile-tools select'), profileMenu: find('.stt-profile-menu'),
         profileActions: find('.stt-profile-actions'), tabs: find('.stt-tabs'),
-        graph: find('.stt-graph'), graphActions: find('.stt-board-actions'), graphLegend: find('.stt-board-footer'),
+        graph: find('.stt-graph'), graphView: find('.stt-graph-view'), graphChecks: find('.stt-graph-checks'),
+        graphActions: find('.stt-board-actions'), graphLegend: find('.stt-board-footer'),
         boardName: find('.stt-board-name'), ascension: find('.stt-asc-page'),
         inspector: find('.stt-inspector'), inspectorTitle: find('.stt-inspector-title'),
         detail: find('.stt-detail'), detailActions: find('.stt-detail-actions'),
+        batchCount: find('.stt-batch-count'), batchList: find('.stt-batch-list'),
+        batchClear: find('.stt-batch-clear'), batchFill: find('.stt-batch-fill'),
     };
     const select = element('select', '', 'stt-tier');
     select.setAttribute('aria-label', '按阶位筛选');
@@ -687,6 +760,11 @@ function bindShell() {
     find('.stt-minus').addEventListener('click', () => graph?.zoom(0.78));
     find('.stt-plus').addEventListener('click', () => graph?.zoom(1.28));
     find('.stt-fit').addEventListener('click', () => graph?.fit());
+    elements.batchClear.addEventListener('click', () => {
+        batchProjects.clear();
+        renderBatch();
+    });
+    elements.batchFill.addEventListener('click', () => fillDraft([...batchProjects.values()]));
     elements.profileSelect.addEventListener('change', event => changeProfile(event.target.value));
     elements.profileMenu.addEventListener('click', () => setProfileMenu(!profileMenuOpen));
     const file = element('input');
@@ -740,7 +818,7 @@ async function loadCatalog() {
     const response = await fetch(new URL('./data/tech-tree.json', import.meta.url));
     if (!response.ok) throw new Error('数据文件无法载入（' + response.status + '）。');
     const catalog = indexCatalog(await response.json());
-    graph = createGraph(elements.graph, selectTech);
+    graph = createGraph(elements.graph, elements.graphChecks, selectTech, node => batchCheckbox(node, 'node'));
     dataCatalog = catalog;
     syncConversation();
     renderView();

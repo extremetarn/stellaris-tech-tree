@@ -5,12 +5,14 @@ const COLORS = {
     P: '#81bdff', S: '#84e1a8', E: '#f6b77c', ME: '#c19dff',
     G: '#ffcf7d', M: '#9ce2eb', A: '#a7b0c5',
 };
+const CARD_WIDTH = 148;
+const CARD_HEIGHT = 54;
 
 const STYLE = [
     {
         selector: 'node',
         style: {
-            width: 148, height: 54, shape: 'round-rectangle',
+            width: CARD_WIDTH, height: CARD_HEIGHT, shape: 'round-rectangle',
             label: 'data(label)', 'font-family': 'system-ui, sans-serif',
             'font-size': 14, 'font-weight': 600, color: '#bed0e2',
             'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'wrap',
@@ -95,7 +97,7 @@ function coordinates(nodes, view) {
     return { nodesWithCoordinates, headings };
 }
 
-export function createGraph(container, onSelect) {
+export function createGraph(container, overlay, onSelect, createCheckbox) {
     const cy = cytoscape({
         container, style: STYLE, elements: [], layout: { name: 'preset' },
         minZoom: 0.15, maxZoom: 2.6, boxSelectionEnabled: false, autoungrabify: true,
@@ -104,9 +106,31 @@ export function createGraph(container, onSelect) {
     let current = '';
     let firstNode = '';
     let canFit = false;
+    let checkboxFrame = null;
+    const checkboxes = new Map();
 
     cy.on('tap', 'node.tech', event => onSelect(event.target.id()));
+    cy.on('viewport resize', queueCheckboxPositions);
     new ResizeObserver(() => cy.resize()).observe(container);
+
+    function queueCheckboxPositions() {
+        if (checkboxFrame !== null) return;
+        checkboxFrame = requestAnimationFrame(() => {
+            checkboxFrame = null;
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            const zoom = cy.zoom();
+            const size = Math.min(24, CARD_HEIGHT * zoom / 2, Math.max(22, 20 * zoom));
+            overlay.style.setProperty('--stt-node-check-size', size + 'px');
+            for (const [id, checkbox] of checkboxes) {
+                const { x, y } = cy.getElementById(id).renderedPosition();
+                const left = x - (CARD_WIDTH / 2 - 5) * zoom;
+                const top = y - (CARD_HEIGHT / 2 - 4) * zoom;
+                checkbox.hidden = !width || !height || left > width || top > height || left + size < 0 || top + size < 0;
+                if (!checkbox.hidden) checkbox.style.transform = 'translate(' + left + 'px,' + top + 'px)';
+            }
+        });
+    }
 
     function focus(id, zoomFloor = 0) {
         const node = cy.getElementById(id);
@@ -167,12 +191,22 @@ export function createGraph(container, onSelect) {
             cy.elements().remove();
             cy.add([...points, ...edges]);
         });
+        checkboxes.clear();
+        const controls = document.createDocumentFragment();
+        for (const { node } of nodesWithCoordinates) {
+            const checkbox = createCheckbox(node);
+            checkbox.hidden = true;
+            checkboxes.set(node.id, checkbox);
+            controls.append(checkbox);
+        }
+        overlay.replaceChildren(controls);
         select(activeId);
         canFit = points.length > 0;
         cy.resize();
         fit();
         if (activeId && view === 'FOCUS') focus(activeId, 0.8);
         else if (cy.zoom() < 0.52) focus(firstNode, container.clientWidth < 600 ? 0.72 : 0.62);
+        queueCheckboxPositions();
     }
 
     function refresh(states) {

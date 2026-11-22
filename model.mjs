@@ -166,12 +166,12 @@ export function toggle(list, value) {
     return list.includes(value) ? list.filter(item => item !== value) : [...list, value];
 }
 
-function prerequisiteDraft(target, catalog, state) {
-    const upstream = new Map();
-    const seen = new Set([target.id]);
-    const label = node => '「' + node.name + '」〔' + node.id + '〕';
+const nodeLabel = node => '「' + node.name + '」〔' + node.id + '〕';
 
+function inspectPrerequisites(targets, catalog, state) {
+    const inspections = new Map();
     function inspect(node) {
+        if (inspections.has(node.id)) return;
         const { groups, conditions, tier } = evaluate(node, catalog, state);
         const missing = [];
         for (const group of groups) {
@@ -179,13 +179,8 @@ function prerequisiteDraft(target, catalog, state) {
             const options = group.map(option => {
                 if (!option.id) return '确认条件「' + option.external + '」';
                 const dependency = catalog.nodes.get(option.id);
-                if (!seen.has(dependency.id)) {
-                    seen.add(dependency.id);
-                    const blockers = inspect(dependency);
-                    upstream.set(dependency.id, '- ' + label(dependency) + '｜'
-                        + (blockers.length ? blockers.join('。') : '自身前置均已满足') + '。');
-                }
-                return '掌握' + label(dependency);
+                inspect(dependency);
+                return '掌握' + nodeLabel(dependency);
             });
             missing.push(options.length === 1 ? options[0] : '任选一项（' + options.join(' 或 ') + '）');
         }
@@ -196,16 +191,30 @@ function prerequisiteDraft(target, catalog, state) {
             missing.push(FIELD_NAMES[node.field] + ' T' + tier.level + ' 已掌握 ' + tier.count + '/' + tier.required
                 + ' 项，还差 ' + (tier.required - tier.count) + ' 项同阶科技');
         }
-        return missing;
+        inspections.set(node.id, { node, missing });
     }
+    for (const target of targets) inspect(target);
+    return inspections;
+}
 
-    const missing = inspect(target);
+function appendUpstream(lines, inspections, targets) {
+    const targetIds = new Set(targets.map(target => target.id));
+    const upstream = [...inspections.values()].filter(({ node }) => !targetIds.has(node.id));
+    if (upstream.length) {
+        lines.push('未掌握的上游节点按研究顺序列在下方。任选组按所选分支推进。');
+        for (const { node, missing } of upstream) {
+            lines.push('- ' + nodeLabel(node) + '｜' + (missing.length ? missing.join('。') : '自身前置均已满足') + '。');
+        }
+    }
+}
+
+function prerequisiteDraft(target, catalog, state) {
+    const inspections = inspectPrerequisites([target], catalog, state);
+    const { missing } = inspections.get(target.id);
     if (!missing.length) return '所有前置均已满足。';
 
     const lines = ['目标节点还缺以下前置与条件。', ...missing.map(value => '- ' + value + '。')];
-    if (upstream.size) {
-        lines.push('未掌握的上游节点按研究顺序列在下方。任选组按所选分支推进。', ...upstream.values());
-    }
+    appendUpstream(lines, inspections, [target]);
     return lines.join('\n');
 }
 
@@ -219,6 +228,29 @@ export function draftFor(item, kind, catalog, state) {
         M: '灰风，接下来处理' + name + '里程碑。',
     }[item.field] ?? ('灰风，准备立项研究' + name + '。');
     return opening + '\n' + prerequisiteDraft(item, catalog, state);
+}
+
+export function draftForBatch(projects, catalog, state) {
+    if (!projects.length) return '';
+    if (projects.length === 1) {
+        const [{ item, kind }] = projects;
+        return draftFor(item, kind, catalog, state);
+    }
+    const targets = projects.filter(({ item, kind }) => kind === 'node' && item.field !== 'A').map(({ item }) => item);
+    const inspections = inspectPrerequisites(targets, catalog, state);
+    const lines = ['灰风，按当前会话的科研档案推进以下项目。', '已选项目'];
+    for (const { item, kind } of projects) {
+        const check = kind === 'node' ? inspections.get(item.id) : undefined;
+        if (!check) {
+            lines.push('- ' + draftFor(item, kind, catalog, state).replace(/^灰风，/, ''));
+            continue;
+        }
+        const action = { G: '规划巨构专项', M: '推进里程碑' }[item.field] ?? '立项研究';
+        lines.push('- ' + action + nodeLabel(item) + '。'
+            + (check.missing.length ? '还需' + check.missing.join('。另需') + '。' : '所有前置均已满足。'));
+    }
+    appendUpstream(lines, inspections, targets);
+    return lines.join('\n');
 }
 
 export function appendDraft(existing, draft) {
