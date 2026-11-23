@@ -1,6 +1,6 @@
 import {
     FIELD_NAMES, STATUS, STORAGE_KEY, VIEWS, appendDraft, connectedNodes, draftForBatch, evaluate,
-    externalKey, indexCatalog, isRepeatableResearch, newProfile, profileSets, restoreSettings,
+    externalKey, indexCatalog, newProfile, profileSets, researchCycles, restoreSettings,
     setResearchCycles, toggle, validateProfile,
 } from './model.mjs';
 import { CIVILIZATION_TYPES } from './civilizations.mjs';
@@ -112,7 +112,7 @@ function buildShell() {
                 </div>
                 <div class="stt-batch-actions">
                     <button type="button" class="stt-batch-clear" disabled>清空</button>
-                    <button type="button" class="stt-batch-learn" title="登记选中的科技及可独立登记的里程碑" disabled>批量掌握</button>
+                    <button type="button" class="stt-batch-learn" title="登记所选科技和可独立登记的里程碑，循环科技每次增加一轮" disabled>批量掌握</button>
                     <button type="button" class="stt-primary stt-batch-fill" disabled>填入已选</button>
                 </div>
             </footer>
@@ -228,29 +228,35 @@ function canRegisterNode(node) {
     return node.field !== 'A' && !node.derivedFrom;
 }
 
-function batchLearnableNodes() {
-    return [...batchProjects.values()]
-        .filter(({ item, kind }) => kind === 'node' && canRegisterNode(item) && !progress.learned.has(item.id))
-        .map(({ item }) => item);
+function batchRegistrations() {
+    const registrations = [];
+    for (const { item, kind } of batchProjects.values()) {
+        if (kind !== 'node' || !canRegisterNode(item)) continue;
+        const cycles = researchCycles(item, progress);
+        if (cycles === null ? !progress.learned.has(item.id) : cycles < Number.MAX_SAFE_INTEGER) {
+            registrations.push({ id: item.id, cycles });
+        }
+    }
+    return registrations;
 }
 
 function renderBatchLearn() {
-    elements.batchLearn.disabled = !chatKey || !batchLearnableNodes().length;
+    elements.batchLearn.disabled = !chatKey || !batchRegistrations().length;
 }
 
 function learnBatch() {
-    const nodes = batchLearnableNodes();
-    if (!nodes.length) return;
+    const registrations = batchRegistrations();
+    if (!registrations.length) return;
     const changed = editConversation(() => {
         const current = profile();
-        for (const node of nodes) {
-            if (isRepeatableResearch(node)) setResearchCycles(current, node.id, 1);
-            else current.learned.push(node.id);
+        for (const { id, cycles } of registrations) {
+            if (cycles === null) current.learned.push(id);
+            else setResearchCycles(current, id, cycles + 1);
         }
     });
     if (!changed) return;
-    const result = '已批量登记 ' + nodes.length + ' 个节点。';
-    notice(nodes.some(node => node.id === 'gateway_construction') ? result + GATEWAY_NOTICE : result);
+    const result = '已批量登记 ' + registrations.length + ' 个节点。';
+    notice(registrations.some(({ id }) => id === 'gateway_construction') ? result + GATEWAY_NOTICE : result);
 }
 
 function renderBatch() {

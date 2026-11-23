@@ -116,8 +116,9 @@ export function profileSets(profile) {
     };
 }
 
-export function isRepeatableResearch(node) {
-    return node.id.startsWith('repeatable_') && node.field !== 'A';
+export function researchCycles(node, state) {
+    if (!node.id.startsWith('repeatable_') || node.field === 'A') return null;
+    return state.repeatCounts?.[node.id] ?? Number(state.learned.has(node.derivedFrom ?? node.id));
 }
 
 export function setResearchCycles(profile, id, count) {
@@ -139,9 +140,7 @@ export function conditionKey(node, condition) {
 
 export function evaluate(node, catalog, state) {
     const completed = id => state.learned.has(catalog.nodes.get(id)?.derivedFrom ?? id);
-    const cycles = isRepeatableResearch(node)
-        ? state.repeatCounts?.[node.id] ?? Number(completed(node.id))
-        : null;
+    const cycles = researchCycles(node, state);
     const groups = node.requires.map(options => options.map(option => ({
         ...option,
         done: option.id ? completed(option.id) : state.conditions.has(externalKey(option)),
