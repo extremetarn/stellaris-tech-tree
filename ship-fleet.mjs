@@ -1,7 +1,8 @@
 import {
     classLabel, customEquipmentEntry, designEntry, designUnlockError, DESIGN_SETTINGS, FLEET_LINK,
-    MAX_CLASS_NAME, normalizeName, ROSTER_NAME, totalDesign,
+    loadEquipment, MAX_CLASS_NAME, normalizeName, ROSTER_NAME, totalDesign,
 } from './ship-model.mjs';
+import { conversationRepeatableLore, REPEATABLE_LORE_NAME } from './repeatable-effects.mjs';
 
 const WORLD_KEY = 'world_info';
 const OWNED_BY = 'sttFleetFor';
@@ -22,6 +23,20 @@ function nextUid(entries) {
     let uid = 0;
     while (Object.hasOwn(entries, uid)) uid++;
     return uid;
+}
+
+function repeatableEntry(entries) {
+    return entries.find(entry => entry.sttRepeatableLore);
+}
+
+function refreshRepeatableEntry(book, template, content) {
+    const existing = repeatableEntry(Object.values(book.entries));
+    const uid = existing?.uid ?? nextUid(book.entries);
+    book.entries[uid] = {
+        ...structuredClone(template), ...existing, uid, comment: REPEATABLE_LORE_NAME,
+        constant: true, addMemo: true, order: 919, preventRecursion: true, ignoreBudget: true,
+        sttRepeatableLore: true, content,
+    };
 }
 
 function refreshFleetEntries(book, template) {
@@ -151,7 +166,8 @@ export function createFleetStore(getConversation, getResearch) {
         let book = await read();
         current(key);
         if (!book || !book.entries || Array.isArray(book.entries)) throw new Error('聊天知识书无法读取。');
-        if (book[OWNED_BY] !== key) {
+        const newBook = book[OWNED_BY] !== key;
+        if (newBook) {
             if (book[OWNED_BY] || Object.keys(book.entries).length) throw new Error('聊天知识书名称冲突。');
             const inherited = previous?.name && previous.key !== key
                 ? await (context.loadWorldInfo ?? api.loadWorldInfo)(previous.name)
@@ -165,7 +181,24 @@ export function createFleetStore(getConversation, getResearch) {
                 }
             }
             refreshFleetEntries(book, api.newWorldInfoEntryTemplate);
-            await writeBook(context, name, book, api);
+        }
+
+        const summary = conversationRepeatableLore(current(key).context);
+        const oldLoadouts = fleetEntries(book).some(entry => !entry.sttLoadoutOnly);
+        if (newBook || oldLoadouts || repeatableEntry(Object.values(book.entries))?.content !== summary) {
+            if (!newBook) book = await lorerequest(context, 'get', { name });
+            if (book[OWNED_BY] !== key) throw new Error('聊天知识书已变更，请重试。');
+            const legacy = fleetEntries(book).filter(entry => !entry.sttLoadoutOnly);
+            const equipment = legacy.length ? await loadEquipment() : null;
+            const live = current(key).context;
+            for (const entry of legacy) {
+                const loadout = designEntry(entry.sttDesign, equipment);
+                Object.assign(entry, { content: loadout.content, sttLoadoutOnly: true });
+            }
+            refreshRepeatableEntry(book, api.newWorldInfoEntryTemplate, conversationRepeatableLore(live));
+            await writeBook(live, name, book, api);
+        }
+        if (newBook) {
             try {
                 await (context.updateWorldInfoList ?? api.updateWorldInfoList)();
             } catch (error) {
@@ -277,12 +310,38 @@ export function createFleetStore(getConversation, getResearch) {
     async function includeSupplementalLore(sources) {
         const { context, key } = getConversation();
         const link = context.chatMetadata?.[FLEET_LINK];
-        if (!key || link?.key !== key || !link.name || context.chatMetadata[WORLD_KEY] === link.name) return;
-        if (Object.values(sources).some(entries => entries.some?.(entry => entry.world === link.name))) return;
-        const api = await worldInfoApi();
-        const book = await (context.loadWorldInfo ?? api.loadWorldInfo)(link.name);
-        if (getConversation().key === key && book?.[OWNED_BY] === key) {
-            sources.chatLore.push(...Object.values(book.entries).map(entry => ({ ...entry, world: link.name })));
+        if (!key || link?.key !== key || !link.name) return;
+        const loaded = Object.values(sources).flat();
+        let managed = loaded.filter(entry => entry.world === link.name);
+        if (!managed.length && context.chatMetadata[WORLD_KEY] !== link.name) {
+            const api = await worldInfoApi();
+            const book = await (context.loadWorldInfo ?? api.loadWorldInfo)(link.name);
+            if (getConversation().key !== key || book?.[OWNED_BY] !== key) return;
+            managed = Object.values(book.entries).map(entry => ({ ...entry, world: link.name }));
+            sources.chatLore.push(...managed);
+        }
+        const summary = repeatableEntry(managed);
+        if (summary) summary.content = conversationRepeatableLore(getConversation().context);
+
+        // Temporary aliases keep the main worldbook as the source for built-in equipment.
+        const shipNames = new Map();
+        for (const { sttDesign } of managed) {
+            if (!sttDesign) continue;
+            for (const row of sttDesign.parts) {
+                if (row.customEquipment) continue;
+                if (!shipNames.has(row.id)) shipNames.set(row.id, new Set());
+                shipNames.get(row.id).add(sttDesign.name);
+            }
+        }
+        if (!shipNames.size) return;
+        const equipment = await loadEquipment();
+        if (getConversation().key !== key) return;
+        for (const entry of loaded) {
+            const id = String(entry.uid);
+            const names = shipNames.get(id);
+            const part = names && equipment.get(id);
+            if (!part || !entry.content?.split('\n', 2)[1]?.startsWith('【' + part.name + '｜')) continue;
+            entry.key = [...new Set([...(entry.key ?? []), ...names])];
         }
     }
 

@@ -8,6 +8,22 @@ export const MAX_QUANTITY = 9999;
 export const MAX_EQUIPMENT_NAME = 80;
 export const CUSTOM_EQUIPMENT_GROUP = '自定义设备';
 
+let equipmentPromise;
+
+export function loadEquipment() {
+    equipmentPromise ??= fetch(new URL('./data/ship-equipment.json', import.meta.url))
+        .then(response => {
+            if (!response.ok) throw new Error('舰装目录无法载入（' + response.status + '）。');
+            return response.json();
+        })
+        .then(parts => new Map(parts.map(part => [part.id, part])))
+        .catch(error => {
+            equipmentPromise = undefined;
+            throw error;
+        });
+    return equipmentPromise;
+}
+
 export const EQUIPMENT_TYPES = {
     power: '供能', weapon: '武器', armor: '装甲', shield: '护盾', device: '设备',
 };
@@ -184,24 +200,19 @@ export function specLabel(spec) {
 }
 
 export function designEntry(design, equipment) {
-    const totals = totalDesign(design, equipment);
     const lines = [
         `【${classLabel(design)}】`,
-        `舰种 ${HULLS.get(design.hullId).name} · 舰级 ${design.name} · 当前会话服役`,
-        `负载 ${totals.usedLoad}／${totals.maxLoad}（舰体 ${totals.baseLoad}，供能 +${totals.addedLoad}） · 散热 ${totals.usedHeat}／${totals.maxHeat}`,
+        `舰种 ${HULLS.get(design.hullId)?.name ?? '舰船'} · 舰级 ${design.name} · 当前会话服役`,
     ];
-    for (const { part, size, quantity, spec } of totals.items) {
-        if (part.custom) {
-            lines.push(`- ${part.name} ×${quantity}`);
-            continue;
-        }
-        const stats = part.stats.map(([label, value]) => `${label} ${value}`).join(' · ');
-        const note = stats || (part.category === 'device' ? part.effect.split('。', 1)[0] : '');
-        lines.push(`- ${part.name}${size ? ' [' + size + ']' : ''} ×${quantity}（${specLabel(spec)}）${note ? ' · ' + note : ''}`);
+    for (const row of design.parts) {
+        const part = designPart(row, equipment);
+        const name = part?.name ?? '设备 ' + row.id;
+        lines.push(`- ${name}${row.size ? ' [' + row.size + ']' : ''} ×${row.quantity}`);
     }
     return {
         key: [design.name], comment: classLabel(design), content: lines.join('\n'),
-        constant: false, matchWholeWords: false, excludeRecursion: true, sttDesign: structuredClone(design),
+        constant: false, matchWholeWords: false, excludeRecursion: true,
+        sttLoadoutOnly: true, sttDesign: structuredClone(design),
     };
 }
 

@@ -34,6 +34,7 @@ const compatibleTypes = new Map([
     ]],
     [settled, [
         'starbase_1', 'colonization_1', 'cryostasis_1', 'planetary_defenses',
+        'repeatable_improved_military_station_damage', 'repeatable_improved_military_station_health',
         'ap_defender_of_the_galaxy', 'ap_eternal_vigilance', 'ap_master_builders',
         'ap_world_shaper', 'ap_detox',
     ]],

@@ -1,26 +1,12 @@
 import {
     classLabel, CUSTOM_EQUIPMENT_GROUP, designPart, designUnlockError, equipmentAvailable, equipmentUnlocked,
     hullAvailable, hullUnlocked, HULL_GROUPS, HULLS,
-    makeCustomEquipment, MAX_CLASS_NAME, MAX_EQUIPMENT_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
+    loadEquipment, makeCustomEquipment, MAX_CLASS_NAME, MAX_EQUIPMENT_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
 } from './ship-model.mjs';
 import { createBlueprint, equipmentGroup, SHIP_SYSTEMS } from './ship-blueprint.mjs';
+import { equipmentReadouts } from './repeatable-effects.mjs';
 
 const PAGE_SIZE = 18;
-let catalogPromise;
-
-function loadEquipment() {
-    catalogPromise ??= fetch(new URL('./data/ship-equipment.json', import.meta.url))
-        .then(response => {
-            if (!response.ok) throw new Error('舰装目录无法载入（' + response.status + '）。');
-            return response.json();
-        })
-        .then(parts => new Map(parts.map(part => [part.id, part])))
-        .catch(error => {
-            catalogPromise = undefined;
-            throw error;
-        });
-    return catalogPromise;
-}
 
 export function createShipDesigner({ dialog, store, getConversation, getResearch, returnToResearch, element, button }) {
     const page = element('section', '', 'stt-design-page');
@@ -297,8 +283,16 @@ export function createShipDesigner({ dialog, store, getConversation, getResearch
             const info = element('div');
             const label = (part?.name ?? '无法读取的舰装') + (row.size ? ' · ' + row.size : '');
             info.append(element('strong', label));
-            const primary = part?.stats[0]?.join(' ');
-            info.append(element('small', primary || (spec ? specLabel(spec) : '请重新选择舰装')));
+            const stats = part ? equipmentReadouts(part, research.effects) : [];
+            if (stats.length) appendStatLines(info, stats.filter((stat, index) => index === 0 || stat.source), 'small');
+            else info.append(element('small', spec ? specLabel(spec) : '请重新选择舰装'));
+            const sources = stats.filter(stat => stat.source);
+            if (sources.length) {
+                const details = element('details', '', 'stt-repeatable-sources');
+                details.append(element('summary', '循环加成'));
+                appendStatSources(details, sources);
+                info.append(details);
+            }
             if (part && !equipmentAvailable(part, hull, research.civilization)) info.append(element('small', '当前舰体不相容', 'is-error'));
             else if (part && !equipmentUnlocked(part, research.unlocked)) info.append(element('small', '科技未解锁', 'is-error'));
             const quantity = element('div', '', 'stt-design-quantity');
@@ -350,6 +344,14 @@ export function createShipDesigner({ dialog, store, getConversation, getResearch
         renderTotals();
     }
 
+    function appendStatLines(host, stats, tag) {
+        for (const stat of stats) host.append(element(tag, stat.text, stat.source ? 'stt-repeatable-stat' : ''));
+    }
+
+    function appendStatSources(host, sources) {
+        for (const stat of sources) host.append(element('p', stat.stat + ' · ' + stat.source, 'stt-repeatable-source'));
+    }
+
     function renderCatalog() {
         ui.add.hidden = !activeSystem || !activeGroup;
         if (ui.add.hidden) return;
@@ -383,12 +385,13 @@ export function createShipDesigner({ dialog, store, getConversation, getResearch
             const main = element('div');
             main.append(element('strong', part.name));
             if (!custom) main.append(element('small', `${part.family} · T${part.tier}`));
-            if (part.stats.length) {
-                main.append(element('p', part.stats.map(([name, value]) => `${name} ${value}`).join(' · ')));
-            }
-            if (part.effect || part.mount) {
+            const stats = equipmentReadouts(part, research.effects);
+            appendStatLines(main, stats, 'p');
+            const sources = stats.filter(stat => stat.source);
+            if (part.effect || part.mount || sources.length) {
                 const details = element('details');
-                details.append(element('summary', '说明'));
+                details.append(element('summary', part.effect || part.mount ? '说明' : '循环加成'));
+                appendStatSources(details, sources);
                 if (part.effect) details.append(element('p', part.effect, custom ? 'stt-custom-effect' : ''));
                 if (part.mount) details.append(element('p', '装舰位置 · ' + part.mount));
                 main.append(details);
