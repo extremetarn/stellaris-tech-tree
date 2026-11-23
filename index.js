@@ -7,6 +7,7 @@ import { createGraph } from './graph.mjs';
 const NAME = '群星科研台';
 const MAIN_VIEWS = ['INTRO', 'P', 'S', 'E', 'ME', 'G', 'ASC'];
 const STAGES = ['入口', '文明转型', '文明终局'];
+const GATEWAY_NOTICE = '里程碑已达成 · L 星门权限授予 · 灰风实体化';
 
 function element(tag, text = '', className = '') {
     const el = document.createElement(tag);
@@ -95,13 +96,14 @@ function buildShell() {
                     <footer class="stt-detail-actions"></footer>
                 </aside>
             </div>
-            <footer class="stt-batch" aria-label="批量填入节点">
+            <footer class="stt-batch" aria-label="已选节点操作">
                 <div class="stt-batch-selection">
                     <strong>已选节点 <span class="stt-batch-count" aria-live="polite">0</span></strong>
                     <ul class="stt-batch-list" aria-label="已选节点列表"></ul>
                 </div>
                 <div class="stt-batch-actions">
                     <button type="button" class="stt-batch-clear" disabled>清空</button>
+                    <button type="button" class="stt-batch-learn" title="登记选中的科技及可独立登记的里程碑" disabled>批量掌握</button>
                     <button type="button" class="stt-primary stt-batch-fill" disabled>填入已选</button>
                 </div>
             </footer>
@@ -187,10 +189,38 @@ function batchCheckbox(item, kind) {
     return checkbox;
 }
 
+function canRegisterNode(node) {
+    return node.field !== 'A' && !node.derivedFrom;
+}
+
+function batchLearnableIds() {
+    const ids = [];
+    for (const { item, kind } of batchProjects.values()) {
+        if (kind === 'node' && canRegisterNode(item) && !progress.learned.has(item.id)) ids.push(item.id);
+    }
+    return ids;
+}
+
+function renderBatchLearn() {
+    elements.batchLearn.disabled = !chatKey || !batchLearnableIds().length;
+}
+
+function learnBatch() {
+    const ids = batchLearnableIds();
+    if (!ids.length) return;
+    const changed = editConversation(() => {
+        profile().learned.push(...ids);
+    });
+    if (!changed) return;
+    const result = '已批量登记 ' + ids.length + ' 个节点。';
+    notice(ids.includes('gateway_construction') ? result + GATEWAY_NOTICE : result);
+}
+
 function renderBatch() {
     elements.batchCount.textContent = String(batchProjects.size);
     elements.batchClear.disabled = !batchProjects.size;
     elements.batchFill.disabled = !batchProjects.size;
+    renderBatchLearn();
     const list = elements.batchList;
     const scroll = list.scrollLeft;
     list.replaceChildren(...[...batchProjects.values()].map(({ item, kind }) => {
@@ -467,6 +497,7 @@ function renderView() {
 
 function refreshProgress() {
     updateProgress();
+    renderBatchLearn();
     renderBoardHeader(visibleNodes());
     if (view === 'ASC') renderAscension();
     else graph.refresh(statusById);
@@ -641,14 +672,14 @@ function renderTech(node) {
     }
     const actions = elements.detailActions;
     actions.append(draftButton(node, 'node'));
-    if (node.field === 'A' || node.derivedFrom) return;
+    if (!canRegisterNode(node)) return;
     const learned = progress.learned.has(node.id);
     const text = learned ? '撤销登记' : node.field === 'M' ? '登记已达成' : '标记已掌握';
     const mark = recordButton(text, () => {
         const changed = editConversation(() => {
             profile().learned = toggle(profile().learned, node.id);
         });
-        if (changed && node.id === 'gateway_construction' && !learned) notice('里程碑已达成 · L 星门权限授予 · 灰风实体化');
+        if (changed && node.id === 'gateway_construction' && !learned) notice(GATEWAY_NOTICE);
     }, 'stt-action ' + (learned ? '' : 'stt-primary'));
     mark.dataset.focusKey = 'mark';
     actions.append(mark);
@@ -734,7 +765,7 @@ function bindShell() {
         inspector: find('.stt-inspector'), inspectorTitle: find('.stt-inspector-title'),
         detail: find('.stt-detail'), detailActions: find('.stt-detail-actions'),
         batchCount: find('.stt-batch-count'), batchList: find('.stt-batch-list'),
-        batchClear: find('.stt-batch-clear'), batchFill: find('.stt-batch-fill'),
+        batchClear: find('.stt-batch-clear'), batchLearn: find('.stt-batch-learn'), batchFill: find('.stt-batch-fill'),
     };
     const select = element('select', '', 'stt-tier');
     select.setAttribute('aria-label', '按阶位筛选');
@@ -764,6 +795,7 @@ function bindShell() {
         batchProjects.clear();
         renderBatch();
     });
+    elements.batchLearn.addEventListener('click', learnBatch);
     elements.batchFill.addEventListener('click', () => fillDraft([...batchProjects.values()]));
     elements.profileSelect.addEventListener('change', event => changeProfile(event.target.value));
     elements.profileMenu.addEventListener('click', () => setProfileMenu(!profileMenuOpen));

@@ -867,3 +867,18 @@
         grid-row: 2;
     }
 }
+
+@media (max-width: 360px) {
+    .stt-batch {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .stt-batch-selection {
+        display: flex;
+    }
+
+    .stt-batch-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+}
