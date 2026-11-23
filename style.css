@@ -32,6 +32,7 @@
     --stt-muted: #a6b9d2;
     --stt-accent: #95d1ff;
     --stt-green: #81e2c4;
+    --stt-red: #ff919a;
     box-sizing: border-box;
     inset: 0;
     width: min(1440px, 97vw);
@@ -434,6 +435,11 @@
     background: var(--stt-green);
 }
 
+.stt-dot.is-repeated {
+    border-color: var(--stt-red);
+    background: var(--stt-red);
+}
+
 .stt-dot.is-ready {
     border-color: var(--stt-accent);
 }
@@ -484,6 +490,11 @@
 .stt-status.is-learned {
     border-color: #4d9b88;
     color: var(--stt-green);
+}
+
+.stt-status.is-repeated {
+    border-color: #b86672;
+    color: var(--stt-red);
 }
 
 .stt-dialog .stt-hide-detail {

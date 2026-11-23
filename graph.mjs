@@ -34,6 +34,10 @@ const STYLE = [
         'z-index': 5,
     } },
     { selector: 'node.neighbor', style: { color: '#f0f7ff', 'border-color': '#819cbb', 'border-width': 2 } },
+    { selector: 'node[status = "repeated"]', style: {
+        'background-color': '#4a232d', 'border-width': 2, 'border-color': '#ff7f89', color: '#ffe0e2',
+    } },
+    { selector: 'node[status = "repeated"].current', style: { 'border-width': 3, 'underlay-color': '#ff7f89' } },
     { selector: 'node.column, node.lane', style: {
         width: 180, height: 30, 'background-opacity': 0, 'border-width': 0,
         'text-max-width': 180, 'text-margin-x': 0, 'font-size': 13, 'font-weight': 700, color: '#8ca7c4',

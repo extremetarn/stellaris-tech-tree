@@ -1,6 +1,7 @@
 import {
     FIELD_NAMES, STATUS, STORAGE_KEY, VIEWS, appendDraft, connectedNodes, draftForBatch, evaluate,
-    externalKey, indexCatalog, newProfile, profileSets, restoreSettings, toggle, validateProfile,
+    externalKey, indexCatalog, isRepeatableResearch, newProfile, profileSets, restoreSettings,
+    setResearchCycles, toggle, validateProfile,
 } from './model.mjs';
 import { CIVILIZATION_TYPES } from './civilizations.mjs';
 import { createGraph } from './graph.mjs';
@@ -89,6 +90,7 @@ function buildShell() {
                     <div class="stt-asc-page" hidden></div>
                     <footer class="stt-board-footer">
                         <span><i class="stt-dot is-learned"></i>已掌握</span>
+                        <span><i class="stt-dot is-repeated"></i>已循环</span>
                         <span><i class="stt-dot is-ready"></i>可点亮</span>
                         <span><i class="stt-dot"></i>前置待确认</span>
                         <span class="stt-line-key">虚线表示任选分支</span>
@@ -226,27 +228,29 @@ function canRegisterNode(node) {
     return node.field !== 'A' && !node.derivedFrom;
 }
 
-function batchLearnableIds() {
-    const ids = [];
-    for (const { item, kind } of batchProjects.values()) {
-        if (kind === 'node' && canRegisterNode(item) && !progress.learned.has(item.id)) ids.push(item.id);
-    }
-    return ids;
+function batchLearnableNodes() {
+    return [...batchProjects.values()]
+        .filter(({ item, kind }) => kind === 'node' && canRegisterNode(item) && !progress.learned.has(item.id))
+        .map(({ item }) => item);
 }
 
 function renderBatchLearn() {
-    elements.batchLearn.disabled = !chatKey || !batchLearnableIds().length;
+    elements.batchLearn.disabled = !chatKey || !batchLearnableNodes().length;
 }
 
 function learnBatch() {
-    const ids = batchLearnableIds();
-    if (!ids.length) return;
+    const nodes = batchLearnableNodes();
+    if (!nodes.length) return;
     const changed = editConversation(() => {
-        profile().learned.push(...ids);
+        const current = profile();
+        for (const node of nodes) {
+            if (isRepeatableResearch(node)) setResearchCycles(current, node.id, 1);
+            else current.learned.push(node.id);
+        }
     });
     if (!changed) return;
-    const result = '已批量登记 ' + ids.length + ' 个节点。';
-    notice(ids.includes('gateway_construction') ? result + GATEWAY_NOTICE : result);
+    const result = '已批量登记 ' + nodes.length + ' 个节点。';
+    notice(nodes.some(node => node.id === 'gateway_construction') ? result + GATEWAY_NOTICE : result);
 }
 
 function renderBatch() {
@@ -515,7 +519,7 @@ function renderBoardHeader(nodes) {
     const showingAscension = view === 'ASC';
     const focus = view === 'FOCUS' ? dataCatalog.nodes.get(focusId)?.name : '';
     const title = focus || VIEWS[view];
-    const completed = nodes.filter(node => ['learned', 'achieved'].includes(statusById.get(node.id))).length;
+    const completed = nodes.filter(node => ['learned', 'achieved', 'repeated'].includes(statusById.get(node.id))).length;
     const count = showingAscension ? '文明飞升档案' : completed + ' / ' + nodes.length + ' 已登记';
     elements.boardName.replaceChildren(element('strong', title), element('span', count));
 }
@@ -689,7 +693,8 @@ function draftButton(item, kind) {
 function renderTech(node) {
     const state = evaluate(node, dataCatalog, progress);
     const subtitle = [FIELD_NAMES[node.field], node.tier === null ? '' : 'T' + node.tier, node.id].filter(Boolean).join(' · ');
-    detailTitle(node.name, subtitle, STATUS[state.status], state.status);
+    const badge = state.status === 'repeated' ? '已循环 ' + state.cycles + ' 次' : STATUS[state.status];
+    detailTitle(node.name, subtitle, badge, state.status);
     const host = elements.detail;
     hint(host, node.summary);
     if (state.groups.length || state.tier || state.conditions.length) {
@@ -737,6 +742,19 @@ function renderTech(node) {
     const actions = elements.detailActions;
     actions.append(draftButton(node, 'node'));
     if (!canRegisterNode(node)) return;
+    if (state.cycles !== null) {
+        const changeCycles = count => editConversation(() => setResearchCycles(profile(), node.id, count));
+        if (state.cycles > 0) {
+            const undo = recordButton('撤回一轮', () => changeCycles(state.cycles - 1), 'stt-action');
+            undo.dataset.focusKey = 'undo-cycle';
+            actions.append(undo);
+        }
+        const mark = recordButton('登记完成一轮', () => changeCycles(state.cycles + 1), 'stt-action stt-primary');
+        mark.disabled ||= state.cycles === Number.MAX_SAFE_INTEGER;
+        mark.dataset.focusKey = 'mark';
+        actions.append(mark);
+        return;
+    }
     const learned = progress.learned.has(node.id);
     const text = learned ? '撤销登记' : node.field === 'M' ? '登记已达成' : '标记已掌握';
     const mark = recordButton(text, () => {

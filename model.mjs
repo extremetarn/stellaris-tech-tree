@@ -109,10 +109,22 @@ export function connectedNodes(catalog, id) {
 
 export function profileSets(profile) {
     return {
-        learned: new Set(profile.learned),
+        learned: new Set([...profile.learned, ...Object.keys(profile.repeatCounts ?? {})]),
+        repeatCounts: profile.repeatCounts,
         conditions: new Set(profile.conditions),
         perks: new Set(profile.perks),
     };
+}
+
+export function isRepeatableResearch(node) {
+    return node.id.startsWith('repeatable_') && node.field !== 'A';
+}
+
+export function setResearchCycles(profile, id, count) {
+    // A pre-counter registration represents one completed cycle.
+    profile.learned = profile.learned.filter(learnedId => learnedId !== id);
+    if (count) profile.repeatCounts[id] = count;
+    else delete profile.repeatCounts[id];
 }
 
 export function externalKey(option) {
@@ -127,6 +139,9 @@ export function conditionKey(node, condition) {
 
 export function evaluate(node, catalog, state) {
     const completed = id => state.learned.has(catalog.nodes.get(id)?.derivedFrom ?? id);
+    const cycles = isRepeatableResearch(node)
+        ? state.repeatCounts?.[node.id] ?? Number(completed(node.id))
+        : null;
     const groups = node.requires.map(options => options.map(option => ({
         ...option,
         done: option.id ? completed(option.id) : state.conditions.has(externalKey(option)),
@@ -147,8 +162,9 @@ export function evaluate(node, catalog, state) {
     let status = ready ? 'ready' : 'locked';
     if (node.field === 'A') status = 'reference';
     else if (node.derivedFrom) status = completed(node.id) ? 'achieved' : 'locked';
+    else if (cycles > 0) status = 'repeated';
     else if (completed(node.id)) status = node.field === 'M' ? 'achieved' : 'learned';
-    return { status, ready, groups, conditions, tier };
+    return { status, ready, groups, conditions, tier, cycles };
 }
 
 export function newProfile(name, source) {
@@ -157,6 +173,7 @@ export function newProfile(name, source) {
         name,
         civilizationType: source?.civilizationType ?? DEFAULT_CIVILIZATION,
         learned: [...(source?.learned ?? [])],
+        repeatCounts: { ...source?.repeatCounts },
         conditions: [...(source?.conditions ?? [])],
         perks: [...(source?.perks ?? [])],
         stages: { ...source?.stages },
@@ -179,12 +196,20 @@ export function validateProfile(profile) {
     if (stages.some(([key, level]) => !/^(ASC-[A-Z]+|ap_[a-z0-9_]+)$/.test(key) || !Number.isInteger(level) || level < 1 || level > 3)) {
         throw new Error('飞升阶段的记录无效。');
     }
+    const repeated = profile.repeatCounts ?? {};
+    const counts = Object.entries(repeated);
+    if (typeof repeated !== 'object' || Array.isArray(repeated) || counts.length > 5000
+        || counts.some(([id, count]) => !/^repeatable_[a-z0-9_]+$/.test(id)
+            || !Number.isSafeInteger(count) || count < 1)) {
+        throw new Error('循环科技的次数记录无效。');
+    }
     return {
         id: profile.id,
         name: profile.name.trim(),
         civilizationType: Object.hasOwn(CIVILIZATION_TYPES, profile.civilizationType)
             ? profile.civilizationType : DEFAULT_CIVILIZATION,
         learned: readStrings(profile.learned),
+        repeatCounts: Object.fromEntries(counts),
         conditions: readStrings(profile.conditions ?? []),
         perks: readStrings(profile.perks ?? []),
         stages: Object.fromEntries(stages),
@@ -237,7 +262,7 @@ function inspectPrerequisites(targets, catalog, state) {
     const inspections = new Map();
     function inspect(node) {
         if (inspections.has(node.id)) return;
-        const { groups, conditions, tier } = evaluate(node, catalog, state);
+        const { groups, conditions, tier, cycles } = evaluate(node, catalog, state);
         const missing = [];
         for (const group of groups) {
             if (group.some(option => option.done)) continue;
@@ -256,7 +281,7 @@ function inspectPrerequisites(targets, catalog, state) {
             missing.push('再掌握 ' + (tier.required - tier.count) + ' 项' + FIELD_NAMES[node.field]
                 + '第 ' + tier.level + ' 阶技术。目前已掌握 ' + tier.count + ' 项，立项要求 ' + tier.required + ' 项');
         }
-        inspections.set(node.id, { node, missing });
+        inspections.set(node.id, { node, missing, cycles });
     }
     for (const target of targets) inspect(target);
     return inspections;
@@ -278,21 +303,24 @@ function researchProject(item, kind) {
     return kind === 'node' && item.field !== 'A';
 }
 
-function projectInstruction(item, kind, ready) {
+function projectInstruction(item, kind, ready, cycles = null) {
     const name = projectName(item);
     if (kind === 'route') return '拟订' + name + '的飞升方案，说明我方资格、目前进展和下一步工程。';
     if (kind === 'perk') return '评估采纳' + name + '的条件，以及它会给我们带来哪些变化。';
     if (item.field === 'A') return '调阅' + name + '的研究档案。';
     if (item.field === 'G') return (ready ? '立项开展' : '筹备') + name + '工程。';
     if (item.field === 'M') return (ready ? '推进' : '筹备') + name + '。';
-    return ready ? '立项研究' + name + '。' : '筹备' + name + '的研究。';
+    const instruction = ready ? '立项研究' + name + '。' : '筹备' + name + '的研究。';
+    if (cycles === null) return instruction;
+    const next = cycles ? (ready ? '立项开展' : '筹备') + name + '的下一轮研究。' : instruction;
+    return name + '当前已循环 ' + cycles + ' 次。' + next;
 }
 
 export function draftFor(item, kind, catalog, state) {
     if (!researchProject(item, kind)) return projectInstruction(item, kind);
     const inspections = inspectPrerequisites([item], catalog, state);
-    const { missing } = inspections.get(item.id);
-    const lines = [projectInstruction(item, kind, !missing.length)];
+    const { missing, cycles } = inspections.get(item.id);
+    const lines = [projectInstruction(item, kind, !missing.length, cycles)];
     if (!missing.length) lines.push(readyForResearch);
     else lines.push('开工前还须完成以下准备。', ...missing.map(value => '- ' + value + '。'));
     appendUpstream(lines, inspections, [item]);
@@ -314,8 +342,8 @@ export function draftForBatch(projects, catalog, state) {
         if (!researchProject(item, kind)) {
             lines.push('- ' + projectInstruction(item, kind));
         } else {
-            const { missing } = inspections.get(item.id);
-            lines.push('- ' + projectInstruction(item, kind, !missing.length));
+            const { missing, cycles } = inspections.get(item.id);
+            lines.push('- ' + projectInstruction(item, kind, !missing.length, cycles));
             if (missing.length) lines.push(...missing.map(value => '  - ' + value + '。'));
             else if (!allReady) lines.push('  - ' + readyForResearch);
         }
