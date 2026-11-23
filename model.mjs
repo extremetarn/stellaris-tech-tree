@@ -118,7 +118,11 @@ export function profileSets(profile) {
 
 export function researchCycles(node, state) {
     if (!node.id.startsWith('repeatable_') || node.field === 'A') return null;
-    return state.repeatCounts?.[node.id] ?? Number(state.learned.has(node.derivedFrom ?? node.id));
+    return recordedResearchCycles(node.id, state, node.derivedFrom ?? node.id);
+}
+
+export function recordedResearchCycles(id, state, learnedId = id) {
+    return state.repeatCounts?.[id] ?? Number(state.learned.has(learnedId));
 }
 
 export function setResearchCycles(profile, id, count) {

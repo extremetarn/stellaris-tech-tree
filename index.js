@@ -7,6 +7,7 @@ import { CIVILIZATION_TYPES, DEFAULT_CIVILIZATION } from './civilizations.mjs';
 import { createGraph } from './graph.mjs';
 import { createFleetStore } from './ship-fleet.mjs';
 import { createShipDesigner } from './ship-designer.mjs';
+import { repeatableEffects, repeatableLore } from './repeatable-effects.mjs';
 
 const NAME = '群星科研台';
 const MAIN_VIEWS = ['INTRO', 'P', 'S', 'E', 'ME', 'G', 'ASC'];
@@ -137,6 +138,7 @@ let focusId = '';
 let ascendView = 'routes';
 let statusById;
 let progress;
+let shipEffects = [];
 let profileMenuOpen = false;
 let searchResults = [];
 let openingButton;
@@ -167,6 +169,7 @@ function getShipResearch() {
         civilization: settings ? profile().civilizationType : DEFAULT_CIVILIZATION,
         unlocked: id => ['learned', 'repeated', 'achieved'].includes(current?.get(id)),
         name: id => technologyNames.get(id) ?? id,
+        effects: current ? shipEffects : [],
     };
 }
 
@@ -295,12 +298,18 @@ function renderBatch() {
 function editConversation(update) {
     const { context, key } = getConversation();
     if (!chatKey || key !== chatKey) return false;
+    const previousLore = repeatableLore(profile());
     update(settings);
     context.chatMetadata[STORAGE_KEY] = structuredClone(settings);
     const revision = chatRevision;
     void context.saveMetadata().catch(error => {
         if (revision === chatRevision) notice('科研进度保存失败。' + error.message, 8000);
     });
+    if (repeatableLore(profile()) !== previousLore) {
+        void fleetStore.prepare(key).catch(error => {
+            if (getConversation().key === key) notice('循环科技条目同步失败。' + error.message, 8000);
+        });
+    }
     renderProfiles();
     refreshProgress();
     return true;
@@ -320,7 +329,9 @@ function notice(text, duration = 5500) {
 }
 
 function updateProgress() {
-    progress = profileSets(profile());
+    const current = profile();
+    progress = profileSets(current);
+    shipEffects = repeatableEffects(current);
     statusById = new Map(Array.from(dataCatalog.nodes, ([id, node]) => [id, evaluate(node, dataCatalog, progress).status]));
     shipDesigner?.refreshResearch();
 }

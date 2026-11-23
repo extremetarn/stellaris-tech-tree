@@ -1372,6 +1372,20 @@
     line-height: 1.45;
 }
 
+.stt-design-page .stt-repeatable-stat {
+    color: var(--stt-blueprint-accent);
+}
+
+.stt-repeatable-sources,
+.stt-repeatable-source {
+    color: var(--stt-muted);
+    font-size: 12px;
+}
+
+.stt-repeatable-sources summary {
+    cursor: pointer;
+}
+
 .stt-design-part details summary {
     margin-top: 4px;
     cursor: pointer;
