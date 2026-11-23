@@ -287,31 +287,35 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             const primary = part?.stats[0]?.join(' ');
             info.append(element('small', primary || (spec ? specLabel(spec) : '请重新选择舰装')));
             if (part && !equipmentAvailable(part, hull, getCivilization())) info.append(element('small', '当前舰体不相容', 'is-error'));
-            const count = element('input');
-            count.type = 'number';
-            count.inputMode = 'numeric';
-            count.min = '1';
-            count.max = String(MAX_QUANTITY);
-            count.step = '1';
-            count.value = String(row.quantity);
-            count.setAttribute('aria-label', label + '数量');
-            count.addEventListener('input', () => {
-                row.quantity = count.valueAsNumber;
-                renderTotals();
-            });
-            count.addEventListener('change', () => {
-                if (!Number.isInteger(row.quantity)) row.quantity = 1;
-                row.quantity = Math.max(1, Math.min(MAX_QUANTITY, row.quantity));
+            const quantity = element('div', '', 'stt-design-quantity');
+            quantity.setAttribute('role', 'group');
+            quantity.setAttribute('aria-label', label + '数量');
+            const count = element('output');
+            const decrease = button('−', () => changeQuantity(-1));
+            const increase = button('＋', () => changeQuantity(1));
+            decrease.setAttribute('aria-label', '减少' + label + '数量');
+            increase.setAttribute('aria-label', '增加' + label + '数量');
+            function updateQuantity() {
                 count.value = String(row.quantity);
+                decrease.disabled = row.quantity <= 1;
+                increase.disabled = row.quantity >= MAX_QUANTITY;
+            }
+            function changeQuantity(delta) {
+                row.quantity = Math.max(1, Math.min(MAX_QUANTITY, row.quantity + delta));
+                updateQuantity();
                 renderTotals();
-            });
+            }
+            updateQuantity();
+            quantity.append(decrease, count, increase);
             const remove = button('×', () => {
                 design.parts.splice(index, 1);
                 renderInstalled();
                 renderTotals();
             }, 'stt-icon');
             remove.setAttribute('aria-label', '移除' + label);
-            card.append(info, count, remove);
+            const actions = element('div', '', 'stt-design-installed-actions');
+            actions.append(quantity, remove);
+            card.append(info, actions);
             ui.installed.append(card);
         }
         if (!ui.installed.childElementCount) ui.installed.append(element('p', '此系统尚未装配。', 'stt-design-empty'));

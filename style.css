@@ -1250,7 +1250,7 @@
     padding-inline: 3px;
 }
 
-.stt-design-installed-row > div,
+.stt-design-installed-row > div:first-child,
 .stt-design-part > div:first-child,
 .stt-design-library-row > div {
     flex: 1;
@@ -1289,9 +1289,52 @@
     font: inherit;
 }
 
-.stt-design-installed-row input[type="number"] {
-    flex: 0 0 3.5rem;
-    width: 3.5rem;
+.stt-design-installed-row {
+    flex-wrap: wrap;
+}
+
+.stt-design-installed-row > div:first-child {
+    flex-basis: 7rem;
+}
+
+.stt-design-installed-actions,
+.stt-design-quantity {
+    display: flex;
+    align-items: center;
+}
+
+.stt-design-installed-actions {
+    flex: none;
+    gap: 6px;
+    margin-inline-start: auto;
+}
+
+.stt-design-quantity {
+    border: 1px solid #3e697d;
+    border-radius: 6px;
+    background: #0d1928;
+}
+
+.stt-dialog .stt-design-quantity button {
+    width: 34px;
+    min-height: 34px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: var(--stt-blueprint-accent);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.stt-dialog .stt-design-quantity button:hover:not(:disabled) {
+    border-color: #49778b;
+    background: #184255;
+}
+
+.stt-design-quantity output {
+    min-width: 4ch;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
 }
 
 .stt-design-part-actions {
