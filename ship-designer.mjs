@@ -1,7 +1,8 @@
 import {
-    classLabel, equipmentAvailable, EQUIPMENT_TYPES, hullAvailable, HULL_GROUPS, HULLS,
+    classLabel, equipmentAvailable, hullAvailable, HULL_GROUPS, HULLS,
     MAX_CLASS_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
 } from './ship-model.mjs';
+import { createBlueprint, equipmentGroup, SHIP_SYSTEMS } from './ship-blueprint.mjs';
 
 const PAGE_SIZE = 18;
 let catalogPromise;
@@ -25,54 +26,45 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     page.hidden = true;
     page.innerHTML = `
         <header class="stt-design-header">
-            <button type="button" data-back>← 科研台</button>
-            <h2 id="stt-design-heading">舰船设计器</h2>
-            <button type="button" data-close aria-label="关闭舰船设计器" class="stt-icon">×</button>
+            <div class="stt-design-heading">
+                <button type="button" data-back>‹ 科研台</button>
+                <h2 id="stt-design-heading">舰船设计器</h2>
+            </div>
+            <button type="button" class="stt-design-title" data-setup-toggle title="舰级设置" aria-expanded="false" aria-controls="stt-ship-setup">
+                <strong data-class-name></strong><span aria-hidden="true">⌄</span>
+            </button>
+            <div class="stt-design-header-actions">
+                <button type="button" data-library>设计库</button>
+                <button type="button" data-close aria-label="关闭舰船设计器" class="stt-icon">×</button>
+            </div>
         </header>
-        <nav class="stt-design-nav" aria-label="舰船设计器页面">
-            <button type="button" data-designer>设计台</button>
-            <button type="button" data-library>设计库</button>
-            <span data-session></span>
-        </nav>
         <div class="stt-design-message" role="status" hidden></div>
-        <div class="stt-design-grid" data-edit>
-            <section class="stt-design-board" aria-label="舰体蓝图与额度">
-                <header>
-                    <span data-hull-name></span>
-                    <h3 data-class-name></h3>
-                </header>
-                <div class="stt-blueprint"><img alt=""></div>
-                <div class="stt-design-budgets">
-                    <div class="stt-budget" data-load>
-                        <div><strong>负载</strong><span></span></div>
-                        <meter aria-label="负载额度" min="0"></meter>
-                        <small></small>
-                    </div>
-                    <div class="stt-budget" data-heat>
-                        <div><strong>散热</strong><span></span></div>
-                        <meter aria-label="散热额度" min="0"></meter>
-                        <small></small>
-                    </div>
-                </div>
+        <div class="stt-design-editor" data-edit>
+            <section class="stt-design-stage" data-stage aria-label="舰体蓝图">
+                <div class="stt-blueprint"><img alt=""><div data-points></div></div>
             </section>
-            <div class="stt-design-workbench">
+            <canvas class="stt-blueprint-lines" data-lines aria-hidden="true"></canvas>
+            <div class="stt-design-overlays" data-overlays hidden>
+                <section class="stt-design-system" data-system id="stt-blueprint-systems" aria-label="系统设备">
+                    <div class="stt-design-chips" data-chips aria-label="设备分类"></div>
+                    <div class="stt-design-installed-panel" data-installed-panel>
+                        <header><h3>已装设备</h3><button type="button" data-dismiss class="stt-icon" aria-label="收起系统设备">×</button></header>
+                        <div class="stt-design-installed" data-installed></div>
+                    </div>
+                </section>
+                <section class="stt-design-add-panel" data-add id="stt-blueprint-add" aria-labelledby="stt-add-group" hidden>
+                    <header><h3 data-add-title id="stt-add-group"></h3><button type="button" data-hide-catalog class="stt-icon" aria-label="收起加装列表">×</button></header>
+                    <input type="search" data-search placeholder="搜索本分类" aria-label="搜索舰装" autocomplete="off">
+                    <div class="stt-design-catalog" data-catalog></div>
+                </section>
+            </div>
+            <section class="stt-design-setup" data-setup id="stt-ship-setup" aria-label="舰级设置" hidden>
                 <div class="stt-design-fields">
                     <label>舰种<select data-hull></select></label>
                     <label>舰级名称<input type="text" data-name placeholder="例如 海风级" autocomplete="off"></label>
                 </div>
-                <section class="stt-design-section">
-                    <div class="stt-design-section-title"><h3>已装舰装</h3><button type="button" data-new>新建设计</button></div>
-                    <div class="stt-design-installed" data-installed></div>
-                </section>
-                <section class="stt-design-section">
-                    <h3>舰装目录</h3>
-                    <div class="stt-design-filters">
-                        <input type="search" data-search placeholder="搜索舰装、型号或效果" aria-label="搜索舰装" autocomplete="off">
-                        <select data-category aria-label="舰装分类"></select>
-                    </div>
-                    <div class="stt-design-catalog" data-catalog></div>
-                </section>
-            </div>
+                <footer><small data-session></small><button type="button" data-new>新建设计</button><button type="button" data-done>完成</button></footer>
+            </section>
         </div>
         <div class="stt-design-library" data-saved hidden>
             <section><h3>跨会话设计</h3><div data-designs></div></section>
@@ -80,7 +72,10 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         </div>
         <footer class="stt-design-footer">
             <div class="stt-design-footer-summary">
-                <strong data-compact-budgets></strong>
+                <div class="stt-design-readouts">
+                    <span data-load>负载 <strong></strong></span>
+                    <span data-heat>散热 <strong></strong></span>
+                </div>
                 <span data-validation></span>
             </div>
             <button type="button" data-save class="stt-primary">保存并服役</button>
@@ -89,15 +84,23 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     dialog.append(page);
     const $ = selector => page.querySelector(selector);
     const ui = {
-        back: $('[data-back]'), close: $('[data-close]'), designer: $('[data-designer]'),
-        library: $('[data-library]'), session: $('[data-session]'), message: $('.stt-design-message'),
+        back: $('[data-back]'), close: $('[data-close]'), library: $('[data-library]'),
+        session: $('[data-session]'), message: $('.stt-design-message'), title: $('[data-setup-toggle]'),
         edit: $('[data-edit]'), saved: $('[data-saved]'), image: $('.stt-blueprint img'),
-        hullName: $('[data-hull-name]'), className: $('[data-class-name]'), load: $('[data-load]'),
-        heat: $('[data-heat]'), hull: $('[data-hull]'), name: $('[data-name]'), fresh: $('[data-new]'),
-        installed: $('[data-installed]'), search: $('[data-search]'), category: $('[data-category]'),
+        stage: $('[data-stage]'), points: $('[data-points]'), lines: $('[data-lines]'),
+        overlay: $('[data-overlays]'), system: $('[data-system]'), chips: $('[data-chips]'),
+        className: $('[data-class-name]'), load: $('[data-load]'), heat: $('[data-heat]'),
+        setup: $('[data-setup]'), hull: $('[data-hull]'), name: $('[data-name]'), fresh: $('[data-new]'),
+        installed: $('[data-installed]'), installedPanel: $('[data-installed-panel]'),
+        search: $('[data-search]'), add: $('[data-add]'), addTitle: $('[data-add-title]'),
         catalog: $('[data-catalog]'), designs: $('[data-designs]'), fleet: $('[data-fleet]'),
-        footer: $('.stt-design-footer'), compactBudgets: $('[data-compact-budgets]'), validation: $('[data-validation]'), save: $('[data-save]'),
+        footer: $('.stt-design-footer'), validation: $('[data-validation]'), save: $('[data-save]'),
     };
+    const blueprint = createBlueprint({
+        stage: ui.stage, image: ui.image, points: ui.points, overlay: ui.overlay,
+        system: ui.system, chips: ui.chips, installed: ui.installedPanel, catalog: ui.add, lines: ui.lines,
+        button, select: id => selectSystem(activeSystem === id ? '' : id),
+    });
     ui.name.maxLength = MAX_CLASS_NAME;
     let design = newDesign();
     let equipment = new Map();
@@ -108,6 +111,9 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     let fleetKey = '';
     let tab = 'editor';
     let limit = PAGE_SIZE;
+    let activeSystem = '';
+    let activeGroup = '';
+    let messageTimer;
 
     function option(value, label) {
         const row = element('option', label);
@@ -116,19 +122,15 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     }
 
     function message(text = '', error = false) {
+        clearTimeout(messageTimer);
         ui.message.textContent = text;
         ui.message.hidden = !text;
         ui.message.classList.toggle('is-error', error);
+        if (text && !error) messageTimer = setTimeout(() => { ui.message.hidden = true; }, 5000);
     }
 
-    function budget(target, used, max, caption) {
-        const value = target.querySelector('span');
-        const meter = target.querySelector('meter');
-        value.textContent = `${used} / ${max}`;
-        meter.max = max || 1;
-        meter.value = Math.min(used, meter.max);
-        meter.setAttribute('aria-valuetext', `${used} / ${max}`);
-        target.querySelector('small').textContent = caption;
+    function budget(target, used, max) {
+        target.querySelector('strong').textContent = `${used} / ${max}`;
         target.classList.toggle('is-over', used > max);
     }
 
@@ -139,14 +141,15 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         const fleetReady = Boolean(key && fleetKey === key);
         const available = hullAvailable(hull, getCivilization());
         ui.session.textContent = fleetReady ? '会话知识书已连接' : key ? '会话知识书待连接' : '未打开会话';
-        ui.className.textContent = normalizeName(design.name) || '未命名舰级';
-        budget(ui.load, totals.usedLoad, totals.maxLoad, `舰体 ${totals.baseLoad} · 供能 +${totals.addedLoad}`);
-        budget(ui.heat, totals.usedHeat, totals.maxHeat, '供能设备占用散热');
-        ui.compactBudgets.textContent = `负载 ${totals.usedLoad}/${totals.maxLoad} · 散热 ${totals.usedHeat}/${totals.maxHeat}`;
+        ui.className.textContent = hull.name + ' · ' + (normalizeName(design.name) || '未命名舰级');
+        budget(ui.load, totals.usedLoad, totals.maxLoad);
+        ui.load.title = `舰体 ${totals.baseLoad} · 供能 +${totals.addedLoad}`;
+        budget(ui.heat, totals.usedHeat, totals.maxHeat);
+        ui.heat.title = '供能设备占用散热';
         ui.validation.textContent = totals.errors[0] || (!available ? '当前文明无法使用这种舰体。'
             : !key ? '打开会话后即可保存并服役。' : !fleetReady ? '保存时将连接会话知识书。'
-                : !normalizeName(design.name) ? '请输入舰级名称。'
-                    : !design.parts.length ? '从舰装目录添加装备。' : '可保存并在本会话服役。');
+                : !design.parts.length ? '点舰体上的波纹点加装设备。'
+                    : !normalizeName(design.name) ? '点舰级名称进行命名。' : '');
         ui.validation.classList.toggle('is-error', Boolean(totals.errors.length || !available));
         ui.save.disabled = busy || !key || !available || !catalogLoaded || !normalizeName(design.name)
             || !design.parts.length || totals.errors.length > 0;
@@ -171,30 +174,83 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             ui.hull.prepend(unavailable);
         }
         ui.hull.value = hull.id;
-        ui.hullName.textContent = hull.name;
-        if (ui.image.dataset.hull !== hull.id) {
-            ui.image.dataset.hull = hull.id;
-            ui.image.alt = hull.name + '线稿蓝图';
-            ui.image.src = new URL(`./assets/blueprints/${hull.id}.webp`, import.meta.url).href;
+        blueprint.setHull(hull);
+    }
+
+    function setSetup(open) {
+        ui.setup.hidden = !open;
+        ui.title.setAttribute('aria-expanded', String(open));
+    }
+
+    function selectSystem(id) {
+        activeSystem = id;
+        activeGroup = '';
+        ui.overlay.scrollTop = 0;
+        ui.overlay.hidden = !id;
+        blueprint.setSelected(id);
+        setSetup(false);
+        renderSelection();
+    }
+
+    function selectGroup(name) {
+        activeGroup = activeGroup === name ? '' : name;
+        limit = PAGE_SIZE;
+        ui.search.value = '';
+        for (const control of ui.chips.children) {
+            const active = control.textContent === activeGroup;
+            control.setAttribute('aria-pressed', String(active));
+            control.setAttribute('aria-expanded', String(active));
         }
+        renderCatalog();
+        if (activeGroup) ui.catalog.scrollTop = 0;
+        blueprint.requestLayout();
+    }
+
+    function renderSelection() {
+        ui.chips.replaceChildren();
+        if (activeSystem) {
+            const hull = HULLS.get(design.hullId);
+            const available = new Set();
+            if (catalogLoaded) {
+                for (const part of equipment.values()) {
+                    if (part.category === activeSystem && equipmentAvailable(part, hull, getCivilization())) {
+                        available.add(equipmentGroup(part));
+                    }
+                }
+            }
+            for (const [name] of SHIP_SYSTEMS[activeSystem].groups) {
+                if (catalogLoaded && !available.has(name)) continue;
+                const chip = button(name, () => selectGroup(name));
+                chip.setAttribute('aria-pressed', String(activeGroup === name));
+                chip.setAttribute('aria-expanded', String(activeGroup === name));
+                chip.setAttribute('aria-controls', 'stt-blueprint-add');
+                ui.chips.append(chip);
+            }
+            if (activeGroup && !available.has(activeGroup) && catalogLoaded) activeGroup = '';
+        }
+        renderInstalled();
+        renderCatalog();
+        blueprint.requestLayout();
     }
 
     function renderInstalled() {
+        ui.installed.replaceChildren();
+        if (!activeSystem) return;
         if (!catalogLoaded) {
-            ui.installed.replaceChildren();
+            ui.installed.append(element('p', '正在载入舰装…', 'stt-design-empty'));
             return;
         }
         const hull = HULLS.get(design.hullId);
-        ui.installed.replaceChildren();
-        if (!design.parts.length) ui.installed.append(element('p', '尚未装配舰装。', 'stt-design-empty'));
         for (const [index, row] of design.parts.entries()) {
             const part = equipment.get(row.id);
+            if ((part?.category ?? 'device') !== activeSystem) continue;
             const spec = part?.specs[row.size];
             const card = element('div', '', 'stt-design-installed-row');
             const info = element('div');
             const label = (part?.name ?? '无法读取的舰装') + (row.size ? ' · ' + row.size : '');
             info.append(element('strong', label));
-            info.append(element('small', spec ? specLabel(spec) : '请重新选择舰装'));
+            const primary = part?.stats[0]?.join(' ');
+            info.append(element('small', primary || (spec ? specLabel(spec) : '请重新选择舰装')));
             if (part && !equipmentAvailable(part, hull, getCivilization())) info.append(element('small', '当前舰体不相容', 'is-error'));
             const count = element('input');
             count.type = 'number';
@@ -223,6 +279,8 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             card.append(info, count, remove);
             ui.installed.append(card);
         }
+        if (!ui.installed.childElementCount) ui.installed.append(element('p', '此系统尚未装配。', 'stt-design-empty'));
+        blueprint.requestLayout();
     }
 
     function addPart(part, size) {
@@ -235,12 +293,17 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     }
 
     function renderCatalog() {
-        if (!catalogLoaded) return;
+        ui.add.hidden = !activeSystem || !activeGroup;
+        if (ui.add.hidden) return;
+        ui.addTitle.textContent = activeGroup;
+        if (!catalogLoaded) {
+            ui.catalog.replaceChildren(element('p', '正在载入舰装…', 'stt-design-empty'));
+            return;
+        }
         const needle = ui.search.value.normalize('NFKC').trim().toLocaleLowerCase();
-        const category = ui.category.value;
         const hull = HULLS.get(design.hullId);
-        const parts = Array.from(equipment.values()).filter(part => equipmentAvailable(part, hull, getCivilization())
-            && (!category || category === part.category)
+        const parts = Array.from(equipment.values()).filter(part => part.category === activeSystem
+            && equipmentGroup(part) === activeGroup && equipmentAvailable(part, hull, getCivilization())
             && (!needle || [part.name, part.english, part.family, part.effect, ...part.stats.flat()]
                 .some(value => value.normalize('NFKC').toLocaleLowerCase().includes(needle))));
         parts.sort((left, right) => (needle && Number(!left.name.startsWith(needle)) - Number(!right.name.startsWith(needle)))
@@ -269,7 +332,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             if (variants.length === 1) {
                 actions.append(element('small', (variants[0][0] ? variants[0][0] + ' · ' : '') + specLabel(variants[0][1])));
             } else actions.append(size);
-            const add = button('添加', () => addPart(part, size.value));
+            const add = button('＋', () => addPart(part, size.value), 'stt-icon');
             add.setAttribute('aria-label', '添加' + part.name);
             actions.append(add);
             card.append(main, actions);
@@ -281,8 +344,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     function renderDesign() {
         renderHull();
         ui.name.value = design.name;
-        renderInstalled();
-        renderCatalog();
+        renderSelection();
         renderTotals();
     }
 
@@ -292,10 +354,13 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         ui.edit.hidden = !editing;
         ui.footer.hidden = !editing;
         ui.saved.hidden = editing;
-        ui.designer.setAttribute('aria-pressed', String(editing));
-        ui.library.setAttribute('aria-pressed', String(!editing));
+        ui.title.hidden = !editing;
+        ui.library.textContent = editing ? '设计库' : '设计台';
         if (editing) renderDesign();
-        else renderLibrary();
+        else {
+            selectSystem('');
+            renderLibrary();
+        }
     }
 
     function libraryRow(item, action) {
@@ -316,7 +381,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
                 design = structuredClone(item);
                 limit = PAGE_SIZE;
                 ui.search.value = '';
-                ui.category.value = '';
+                selectSystem('');
                 message();
                 selectTab('editor');
             }));
@@ -370,6 +435,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             if (save && design.id === snapshot.id && JSON.stringify(design) === JSON.stringify(snapshot)) {
                 design = result.design;
                 ui.name.value = design.name;
+                renderInstalled();
             }
             if (result.libraryError) {
                 message(classLabel(result.design) + ' 已在本会话服役。跨会话设计库保存失败，请再点一次「保存并服役」。', true);
@@ -393,14 +459,12 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         if (catalogLoaded || loading) return;
         try {
             loading = true;
-            ui.catalog.textContent = '正在载入舰装目录…';
             equipment = await loadEquipment();
             catalogLoaded = true;
-            ui.catalog.textContent = '';
             renderDesign();
             if (tab !== 'editor') renderLibrary();
         } catch (error) {
-            ui.catalog.replaceChildren(element('p', error.message, 'stt-design-empty'), button('重试', open));
+            message(error.message + '，返回设计台可重试。', true);
         } finally {
             loading = false;
         }
@@ -412,22 +476,63 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         if (page.hidden) return;
         if (error) message(error.message, true);
         renderHull();
+        renderSelection();
         renderTotals();
         if (tab !== 'editor') renderLibrary();
     }
 
     function close() {
+        selectSystem('');
         page.hidden = true;
         returnToResearch();
     }
 
+    function dismissSystem() {
+        const id = activeSystem;
+        selectSystem('');
+        blueprint.focus(id);
+    }
+
+    function dismissCatalog() {
+        const control = ui.chips.querySelector('[aria-pressed="true"]');
+        selectGroup(activeGroup);
+        control?.focus({ preventScroll: true });
+    }
+
     ui.back.addEventListener('click', close);
     ui.close.addEventListener('click', () => dialog.close());
-    ui.designer.addEventListener('click', () => selectTab('editor'));
-    ui.library.addEventListener('click', () => selectTab('library'));
+    ui.library.addEventListener('click', () => {
+        selectTab(tab === 'editor' ? 'library' : 'editor');
+        if (tab === 'editor' && !catalogLoaded && !loading) void open();
+    });
+    ui.title.addEventListener('click', () => {
+        const open = ui.setup.hidden;
+        selectSystem('');
+        setSetup(open);
+        if (open) ui.hull.focus({ preventScroll: true });
+    });
+    $('[data-done]').addEventListener('click', () => {
+        setSetup(false);
+        ui.title.focus({ preventScroll: true });
+    });
+    $('[data-dismiss]').addEventListener('click', dismissSystem);
+    $('[data-hide-catalog]').addEventListener('click', dismissCatalog);
+    ui.stage.addEventListener('click', event => {
+        if (!event.target.closest('.stt-blueprint-point')) selectSystem('');
+    });
+    page.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        if (!ui.setup.hidden) {
+            setSetup(false);
+            ui.title.focus({ preventScroll: true });
+        } else if (activeGroup) dismissCatalog();
+        else if (activeSystem) dismissSystem();
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+    });
     ui.hull.addEventListener('change', () => {
         design.hullId = ui.hull.value;
-        limit = PAGE_SIZE;
         renderDesign();
     });
     ui.name.addEventListener('input', () => {
@@ -437,14 +542,15 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     ui.fresh.addEventListener('click', () => {
         design = newDesign(hullAvailable(HULLS.get(design.hullId), getCivilization()) ? design.hullId : 'corvette');
         message();
-        ui.name.value = '';
-        ui.name.focus();
         renderDesign();
+        ui.name.focus();
     });
-    ui.category.append(option('', '全部舰装'), ...Object.entries(EQUIPMENT_TYPES).map(([id, name]) => option(id, name)));
-    for (const [input, event] of [[ui.search, 'input'], [ui.category, 'change']]) {
-        input.addEventListener(event, () => { limit = PAGE_SIZE; renderCatalog(); });
-    }
+    ui.search.addEventListener('input', () => {
+        limit = PAGE_SIZE;
+        ui.catalog.scrollTop = 0;
+        renderCatalog();
+        blueprint.requestLayout();
+    });
     ui.save.addEventListener('click', () => performActivation(design, true));
     return { open, setFleet, close, get visible() { return !page.hidden; } };
 }
