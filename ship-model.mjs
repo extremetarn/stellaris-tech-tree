@@ -5,6 +5,8 @@ export const FLEET_LINK = 'stellarisChatFleet';
 export const ROSTER_NAME = '当前服役舰船列表';
 export const MAX_CLASS_NAME = 48;
 export const MAX_QUANTITY = 9999;
+export const MAX_EQUIPMENT_NAME = 80;
+export const CUSTOM_EQUIPMENT_GROUP = '自定义设备';
 
 export const EQUIPMENT_TYPES = {
     power: '供能', weapon: '武器', armor: '装甲', shield: '护盾', device: '设备',
@@ -79,15 +81,39 @@ export function equipmentAvailable(part, hull, civilization) {
         && (!part.research.length || part.research.some(id => supportsCivilization(id, civilization)));
 }
 
+function newId() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export function newDesign(hullId = 'corvette') {
     return {
-        id: Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''),
-        hullId, name: '', parts: [],
+        id: newId(), hullId, name: '', parts: [],
     };
 }
 
 export function normalizeName(name) {
     return String(name ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ');
+}
+
+export function makeCustomEquipment({ id, category, name, load, heat, capacity, effect }) {
+    name = name.trim();
+    if (!name || name.length > MAX_EQUIPMENT_NAME || /^\/.*\/[a-z]*$/iu.test(name)) {
+        throw new Error('请输入 1–' + MAX_EQUIPMENT_NAME + ' 个字符的设备名称，供绿灯条目按名称触发。');
+    }
+    if (!Object.hasOwn(EQUIPMENT_TYPES, category)) throw new Error('无法识别设备所属系统。');
+    if (![load, heat, capacity].every(value => Number.isInteger(value) && value >= 0 && value <= MAX_QUANTITY)) {
+        throw new Error('负载、散热和负载上限增量须为 0–' + MAX_QUANTITY + ' 的整数。');
+    }
+    const spec = { load, heat };
+    if (category === 'power' && capacity) spec.capacity = capacity;
+    return {
+        id: id ?? 'custom-' + newId(), name, category, custom: true,
+        effect, stats: [], research: [], specs: { '': spec },
+    };
+}
+
+export function designPart(row, equipment) {
+    return row.customEquipment ?? equipment.get(row.id);
 }
 
 export function totalDesign(design, equipment, civilization = DEFAULT_CIVILIZATION) {
@@ -96,7 +122,7 @@ export function totalDesign(design, equipment, civilization = DEFAULT_CIVILIZATI
     const items = [];
     const errors = [];
     for (const row of design.parts) {
-        const part = equipment.get(row.id);
+        const part = designPart(row, equipment);
         const spec = part && Object.hasOwn(part.specs, row.size) ? part.specs[row.size] : null;
         const quantity = row.quantity;
         if (!spec || !Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
@@ -111,7 +137,7 @@ export function totalDesign(design, equipment, civilization = DEFAULT_CIVILIZATI
     }
     totals.maxLoad = totals.baseLoad + totals.addedLoad;
     if (totals.usedLoad > totals.maxLoad) errors.push('舰装超过负载额度。');
-    if (totals.usedHeat > totals.maxHeat) errors.push('供能设备超过散热额度。');
+    if (totals.usedHeat > totals.maxHeat) errors.push('舰装超过散热额度。');
     return { ...totals, items, errors: [...new Set(errors)] };
 }
 
@@ -120,7 +146,8 @@ export function classLabel(design) {
 }
 
 export function specLabel(spec) {
-    return spec.capacity == null ? `负载 ${spec.load}` : `负载上限 +${spec.capacity} · 散热 ${spec.heat}`;
+    if (spec.capacity == null) return `负载 ${spec.load}` + (spec.heat ? ` · 散热 ${spec.heat}` : '');
+    return (spec.load ? `负载 ${spec.load} · ` : '') + `负载上限 +${spec.capacity} · 散热 ${spec.heat ?? 0}`;
 }
 
 export function designEntry(design, equipment) {
@@ -131,6 +158,10 @@ export function designEntry(design, equipment) {
         `负载 ${totals.usedLoad}／${totals.maxLoad}（舰体 ${totals.baseLoad}，供能 +${totals.addedLoad}） · 散热 ${totals.usedHeat}／${totals.maxHeat}`,
     ];
     for (const { part, size, quantity, spec } of totals.items) {
+        if (part.custom) {
+            lines.push(`- ${part.name} ×${quantity}`);
+            continue;
+        }
         const stats = part.stats.map(([label, value]) => `${label} ${value}`).join(' · ');
         const note = stats || (part.category === 'device' ? part.effect.split('。', 1)[0] : '');
         lines.push(`- ${part.name}${size ? ' [' + size + ']' : ''} ×${quantity}（${specLabel(spec)}）${note ? ' · ' + note : ''}`);
@@ -138,5 +169,17 @@ export function designEntry(design, equipment) {
     return {
         key: [design.name], comment: classLabel(design), content: lines.join('\n'),
         constant: false, matchWholeWords: false, excludeRecursion: true, sttDesign: structuredClone(design),
+    };
+}
+
+export function customEquipmentEntry(part) {
+    const lines = [
+        `【${part.name}】`,
+        `${CUSTOM_EQUIPMENT_GROUP} · ${EQUIPMENT_TYPES[part.category]} · ${specLabel(part.specs[''])}`,
+    ];
+    if (part.effect.trim()) lines.push(part.effect);
+    return {
+        key: [part.name], comment: part.name, content: lines.join('\n'),
+        constant: false, matchWholeWords: false, excludeRecursion: true, sttCustomEquipment: part.id,
     };
 }

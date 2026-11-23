@@ -1,6 +1,6 @@
 import {
-    classLabel, equipmentAvailable, hullAvailable, HULL_GROUPS, HULLS,
-    MAX_CLASS_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
+    classLabel, CUSTOM_EQUIPMENT_GROUP, designPart, equipmentAvailable, hullAvailable, HULL_GROUPS, HULLS,
+    makeCustomEquipment, MAX_CLASS_NAME, MAX_EQUIPMENT_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
 } from './ship-model.mjs';
 import { createBlueprint, equipmentGroup, SHIP_SYSTEMS } from './ship-blueprint.mjs';
 
@@ -54,7 +54,10 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
                 </section>
                 <section class="stt-design-add-panel" data-add id="stt-blueprint-add" aria-labelledby="stt-add-group" hidden>
                     <header><h3 data-add-title id="stt-add-group"></h3><button type="button" data-hide-catalog class="stt-icon" aria-label="收起加装列表">×</button></header>
-                    <input type="search" data-search placeholder="搜索本分类" aria-label="搜索舰装" autocomplete="off">
+                    <div class="stt-design-catalog-tools">
+                        <input type="search" data-search placeholder="搜索本分类" aria-label="搜索舰装" autocomplete="off">
+                        <button type="button" data-create-custom hidden>新建设备</button>
+                    </div>
                     <div class="stt-design-catalog" data-catalog></div>
                 </section>
             </div>
@@ -70,6 +73,23 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             <section><h3>跨会话设计</h3><div data-designs></div></section>
             <section><h3>当前服役舰船列表</h3><div data-fleet></div></section>
         </div>
+        <section class="stt-design-custom" data-custom-editor aria-labelledby="stt-custom-heading" hidden>
+            <form>
+                <h3 id="stt-custom-heading"></h3>
+                <label>设备名称<input type="text" data-custom-name required autocomplete="off"></label>
+                <div class="stt-design-fields stt-custom-budgets">
+                    <label>负载<input type="number" data-custom-load required step="1" inputmode="numeric"></label>
+                    <label>散热<input type="number" data-custom-heat required step="1" inputmode="numeric"></label>
+                    <label>负载上限增量<input type="number" data-custom-capacity required step="1" inputmode="numeric"></label>
+                </div>
+                <label>原创设定<textarea data-custom-effect rows="7"></textarea></label>
+                <footer>
+                    <button type="button" data-delete-custom hidden>删除模板</button>
+                    <button type="button" data-cancel-custom>取消</button>
+                    <button type="submit" data-save-custom class="stt-primary">保存设备</button>
+                </footer>
+            </form>
+        </section>
         <footer class="stt-design-footer">
             <div class="stt-design-footer-summary">
                 <div class="stt-design-readouts">
@@ -94,6 +114,12 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         installed: $('[data-installed]'), installedPanel: $('[data-installed-panel]'),
         search: $('[data-search]'), add: $('[data-add]'), addTitle: $('[data-add-title]'),
         catalog: $('[data-catalog]'), designs: $('[data-designs]'), fleet: $('[data-fleet]'),
+        customEditor: $('[data-custom-editor]'), customForm: $('[data-custom-editor] form'),
+        customHeading: $('#stt-custom-heading'), customName: $('[data-custom-name]'),
+        customLoad: $('[data-custom-load]'), customHeat: $('[data-custom-heat]'),
+        customCapacity: $('[data-custom-capacity]'), customEffect: $('[data-custom-effect]'),
+        createCustom: $('[data-create-custom]'), deleteCustom: $('[data-delete-custom]'),
+        cancelCustom: $('[data-cancel-custom]'), saveCustom: $('[data-save-custom]'),
         footer: $('.stt-design-footer'), validation: $('[data-validation]'), save: $('[data-save]'),
     };
     const blueprint = createBlueprint({
@@ -102,6 +128,11 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         button, select: id => selectSystem(activeSystem === id ? '' : id),
     });
     ui.name.maxLength = MAX_CLASS_NAME;
+    ui.customName.maxLength = MAX_EQUIPMENT_NAME;
+    for (const input of [ui.customLoad, ui.customHeat, ui.customCapacity]) {
+        input.min = '0';
+        input.max = String(MAX_QUANTITY);
+    }
     let design = newDesign();
     let equipment = new Map();
     let catalogLoaded = false;
@@ -113,6 +144,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     let limit = PAGE_SIZE;
     let activeSystem = '';
     let activeGroup = '';
+    let customEditing;
     let messageTimer;
 
     function option(value, label) {
@@ -145,7 +177,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         budget(ui.load, totals.usedLoad, totals.maxLoad);
         ui.load.title = `舰体 ${totals.baseLoad} · 供能 +${totals.addedLoad}`;
         budget(ui.heat, totals.usedHeat, totals.maxHeat);
-        ui.heat.title = '供能设备占用散热';
+        ui.heat.title = '已装设备占用散热';
         ui.validation.textContent = totals.errors[0] || (!available ? '当前文明无法使用这种舰体。'
             : !key ? '打开会话后即可保存并服役。' : !fleetReady ? '保存时将连接会话知识书。'
                 : !design.parts.length ? '点舰体上的波纹点加装设备。'
@@ -217,8 +249,11 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
                         available.add(equipmentGroup(part));
                     }
                 }
+                available.add(CUSTOM_EQUIPMENT_GROUP);
             }
-            for (const [name] of SHIP_SYSTEMS[activeSystem].groups) {
+            const groups = SHIP_SYSTEMS[activeSystem].groups.map(([name]) => name);
+            if (catalogLoaded) groups.push(CUSTOM_EQUIPMENT_GROUP);
+            for (const name of groups) {
                 if (catalogLoaded && !available.has(name)) continue;
                 const chip = button(name, () => selectGroup(name));
                 chip.setAttribute('aria-pressed', String(activeGroup === name));
@@ -242,7 +277,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         }
         const hull = HULLS.get(design.hullId);
         for (const [index, row] of design.parts.entries()) {
-            const part = equipment.get(row.id);
+            const part = designPart(row, equipment);
             if ((part?.category ?? 'device') !== activeSystem) continue;
             const spec = part?.specs[row.size];
             const card = element('div', '', 'stt-design-installed-row');
@@ -284,9 +319,14 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     }
 
     function addPart(part, size) {
-        const existing = design.parts.find(row => row.id === part.id && row.size === size);
+        const existing = design.parts.find(row => row.id === part.id && row.size === size
+            && (!part.custom || JSON.stringify(row.customEquipment) === JSON.stringify(part)));
         if (existing) existing.quantity = Math.min(MAX_QUANTITY, (existing.quantity || 0) + 1);
-        else design.parts.push({ id: part.id, size, quantity: 1 });
+        else {
+            const row = { id: part.id, size, quantity: 1 };
+            if (part.custom) row.customEquipment = structuredClone(part);
+            design.parts.push(row);
+        }
         message();
         renderInstalled();
         renderTotals();
@@ -296,31 +336,40 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         ui.add.hidden = !activeSystem || !activeGroup;
         if (ui.add.hidden) return;
         ui.addTitle.textContent = activeGroup;
+        const custom = activeGroup === CUSTOM_EQUIPMENT_GROUP;
+        ui.createCustom.hidden = !custom;
         if (!catalogLoaded) {
             ui.catalog.replaceChildren(element('p', '正在载入舰装…', 'stt-design-empty'));
             return;
         }
         const needle = ui.search.value.normalize('NFKC').trim().toLocaleLowerCase();
         const hull = HULLS.get(design.hullId);
-        const parts = Array.from(equipment.values()).filter(part => part.category === activeSystem
-            && equipmentGroup(part) === activeGroup && equipmentAvailable(part, hull, getCivilization())
+        const source = custom ? store.customEquipment() : equipment.values();
+        const parts = Array.from(source).filter(part => part.category === activeSystem
+            && (custom || equipmentGroup(part) === activeGroup) && equipmentAvailable(part, hull, getCivilization())
             && (!needle || [part.name, part.english, part.family, part.effect, ...part.stats.flat()]
-                .some(value => value.normalize('NFKC').toLocaleLowerCase().includes(needle))));
-        parts.sort((left, right) => (needle && Number(!left.name.startsWith(needle)) - Number(!right.name.startsWith(needle)))
-            || left.tier - right.tier || left.name.localeCompare(right.name, 'zh-Hans'));
+                .some(value => value?.normalize('NFKC').toLocaleLowerCase().includes(needle))));
+        if (!custom) {
+            parts.sort((left, right) => (needle && Number(!left.name.startsWith(needle)) - Number(!right.name.startsWith(needle)))
+                || left.tier - right.tier || left.name.localeCompare(right.name, 'zh-Hans'));
+        }
         ui.catalog.replaceChildren();
-        if (!parts.length) ui.catalog.append(element('p', '没有匹配且相容的舰装。', 'stt-design-empty'));
+        if (!parts.length) {
+            const empty = custom && !needle ? '此系统暂无自定义设备。' : '没有匹配且相容的舰装。';
+            ui.catalog.append(element('p', empty, 'stt-design-empty'));
+        }
         for (const part of parts.slice(0, limit)) {
             const card = element('article', '', 'stt-design-part');
             const main = element('div');
-            main.append(element('strong', part.name), element('small', `${part.family} · T${part.tier}`));
+            main.append(element('strong', part.name));
+            if (!custom) main.append(element('small', `${part.family} · T${part.tier}`));
             if (part.stats.length) {
                 main.append(element('p', part.stats.map(([name, value]) => `${name} ${value}`).join(' · ')));
             }
             if (part.effect || part.mount) {
                 const details = element('details');
                 details.append(element('summary', '说明'));
-                if (part.effect) details.append(element('p', part.effect));
+                if (part.effect) details.append(element('p', part.effect, custom ? 'stt-custom-effect' : ''));
                 if (part.mount) details.append(element('p', '装舰位置 · ' + part.mount));
                 main.append(details);
             }
@@ -332,6 +381,11 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             if (variants.length === 1) {
                 actions.append(element('small', (variants[0][0] ? variants[0][0] + ' · ' : '') + specLabel(variants[0][1])));
             } else actions.append(size);
+            if (custom) {
+                const edit = button('编辑', () => openCustomEditor(part), 'stt-custom-edit');
+                edit.setAttribute('aria-label', '编辑' + part.name);
+                actions.append(edit);
+            }
             const add = button('＋', () => addPart(part, size.value), 'stt-icon');
             add.setAttribute('aria-label', '添加' + part.name);
             actions.append(add);
@@ -351,15 +405,64 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     function selectTab(next) {
         tab = next;
         const editing = tab === 'editor';
+        const library = tab === 'library';
         ui.edit.hidden = !editing;
         ui.footer.hidden = !editing;
-        ui.saved.hidden = editing;
+        ui.saved.hidden = !library;
+        ui.customEditor.hidden = editing || library;
         ui.title.hidden = !editing;
+        ui.library.hidden = !editing && !library;
         ui.library.textContent = editing ? '设计库' : '设计台';
         if (editing) renderDesign();
-        else {
+        else if (library) {
             selectSystem('');
             renderLibrary();
+        }
+    }
+
+    function openCustomEditor(part) {
+        if (busy) return;
+        customEditing = part;
+        const spec = part?.specs[''];
+        const system = SHIP_SYSTEMS[activeSystem];
+        ui.customHeading.textContent = (part ? '编辑自定义设备' : '新建自定义设备') + ' · ' + system.label;
+        ui.customName.value = part?.name ?? '';
+        ui.customLoad.value = spec?.load ?? 0;
+        ui.customHeat.value = spec?.heat ?? 0;
+        ui.customCapacity.value = spec?.capacity ?? 0;
+        ui.customCapacity.parentElement.hidden = activeSystem !== 'power';
+        ui.customEffect.value = part?.effect ?? '';
+        ui.deleteCustom.hidden = !part;
+        message();
+        selectTab('custom');
+        ui.customName.focus({ preventScroll: true });
+    }
+
+    function finishCustomEditor() {
+        customEditing = undefined;
+        selectTab('editor');
+        ui.createCustom.focus({ preventScroll: true });
+    }
+
+    async function saveCustomEquipment(id, part) {
+        if (busy) return;
+        busy = true;
+        for (const field of ui.customForm.elements) field.disabled = true;
+        try {
+            await store.saveCustomEquipment(id, part);
+            if (!page.hidden && tab === 'custom') {
+                ui.search.value = '';
+                limit = PAGE_SIZE;
+                finishCustomEditor();
+                message(part ? '自定义设备已保存。' : '自定义设备模板已删除。');
+            }
+        } catch (error) {
+            if (!page.hidden) message(error.message, true);
+        } finally {
+            busy = false;
+            for (const field of ui.customForm.elements) field.disabled = false;
+            renderTotals();
+            if (tab === 'library') renderLibrary();
         }
     }
 
@@ -483,6 +586,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
 
     function close() {
         selectSystem('');
+        if (tab === 'custom') finishCustomEditor();
         page.hidden = true;
         returnToResearch();
     }
@@ -517,12 +621,34 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     });
     $('[data-dismiss]').addEventListener('click', dismissSystem);
     $('[data-hide-catalog]').addEventListener('click', dismissCatalog);
+    ui.createCustom.addEventListener('click', () => openCustomEditor());
+    ui.cancelCustom.addEventListener('click', finishCustomEditor);
+    ui.deleteCustom.addEventListener('click', () => {
+        if (customEditing && window.confirm('删除自定义设备模板「' + customEditing.name + '」？')) {
+            void saveCustomEquipment(customEditing.id, null);
+        }
+    });
+    ui.customForm.addEventListener('submit', event => {
+        event.preventDefault();
+        try {
+            const part = makeCustomEquipment({
+                id: customEditing?.id, category: activeSystem, name: ui.customName.value,
+                load: ui.customLoad.valueAsNumber, heat: ui.customHeat.valueAsNumber,
+                capacity: ui.customCapacity.valueAsNumber, effect: ui.customEffect.value,
+            });
+            void saveCustomEquipment(part.id, part);
+        } catch (error) {
+            message(error.message, true);
+        }
+    });
     ui.stage.addEventListener('click', event => {
         if (!event.target.closest('.stt-blueprint-point')) selectSystem('');
     });
     page.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
-        if (!ui.setup.hidden) {
+        if (tab === 'custom') {
+            if (!busy) finishCustomEditor();
+        } else if (!ui.setup.hidden) {
             setSetup(false);
             ui.title.focus({ preventScroll: true });
         } else if (activeGroup) dismissCatalog();

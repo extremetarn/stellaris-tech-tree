@@ -1,5 +1,5 @@
 import {
-    classLabel, designEntry, DESIGN_SETTINGS, FLEET_LINK, hullAvailable, HULLS,
+    classLabel, customEquipmentEntry, designEntry, DESIGN_SETTINGS, FLEET_LINK, hullAvailable, HULLS,
     MAX_CLASS_NAME, normalizeName, ROSTER_NAME, totalDesign,
 } from './ship-model.mjs';
 
@@ -24,16 +24,34 @@ function nextUid(entries) {
     return uid;
 }
 
-function refreshRoster(book, template) {
+function refreshFleetEntries(book, template) {
+    const deployed = fleetEntries(book);
     const existing = Object.values(book.entries).find(entry => entry.sttRoster);
     const uid = existing?.uid ?? nextUid(book.entries);
-    const ships = fleetEntries(book).map(entry => classLabel(entry.sttDesign));
+    const ships = deployed.map(entry => classLabel(entry.sttDesign));
     book.entries[uid] = {
         ...structuredClone(template),
         uid, comment: ROSTER_NAME, constant: true, addMemo: true, order: 920,
         preventRecursion: true, ignoreBudget: true, sttRoster: true,
         content: `【${ROSTER_NAME}】\n${ships.length ? ships.map(ship => '- ' + ship).join('\n') : '本会话暂无已登记的服役舰船。'}`,
     };
+    // A definition shared by several deployed classes needs only one green entry.
+    const key = entry => JSON.stringify([entry.sttCustomEquipment, entry.content]);
+    const needed = new Map();
+    for (const { sttDesign } of deployed) {
+        for (const { customEquipment: part } of sttDesign.parts) {
+            if (!part?.custom) continue;
+            const entry = customEquipmentEntry(part);
+            needed.set(key(entry), entry);
+        }
+    }
+    for (const entry of Object.values(book.entries)) {
+        if (entry.sttCustomEquipment && !needed.delete(key(entry))) delete book.entries[entry.uid];
+    }
+    for (const entry of needed.values()) {
+        const uid = nextUid(book.entries);
+        book.entries[uid] = { ...structuredClone(template), uid, addMemo: true, ...entry };
+    }
 }
 
 export function createFleetStore(getConversation) {
@@ -59,11 +77,16 @@ export function createFleetStore(getConversation) {
         return Array.isArray(designs) ? structuredClone(designs) : [];
     }
 
-    async function saveLibrary(context, designs) {
+    function customEquipment() {
+        const equipment = getConversation().context.extensionSettings?.[DESIGN_SETTINGS]?.customEquipment;
+        return Array.isArray(equipment) ? structuredClone(equipment) : [];
+    }
+
+    async function saveLibrary(context, updates) {
         const { saveSettings } = await import('/script.js');
         const event = context.eventTypes.SETTINGS_UPDATED;
         const previous = context.extensionSettings[DESIGN_SETTINGS];
-        const value = { designs };
+        const value = { ...previous, ...updates };
         let saved = false;
         const confirmed = () => { saved = true; };
         if (event) context.eventSource.on(event, confirmed);
@@ -80,6 +103,15 @@ export function createFleetStore(getConversation) {
         } finally {
             if (event) context.eventSource.removeListener(event, confirmed);
         }
+    }
+
+    function saveCustomEquipment(id, part) {
+        return enqueue(async () => {
+            const { context } = getConversation();
+            const equipment = customEquipment().filter(item => item.id !== id);
+            if (part) equipment.unshift(part);
+            await saveLibrary(context, { customEquipment: equipment });
+        });
     }
 
     async function lorerequest(context, endpoint, payload) {
@@ -132,7 +164,7 @@ export function createFleetStore(getConversation) {
                     book.entries[uid] = { ...entry, uid };
                 }
             }
-            refreshRoster(book, api.newWorldInfoEntryTemplate);
+            refreshFleetEntries(book, api.newWorldInfoEntryTemplate);
             await writeBook(context, name, book, api);
             try {
                 await (context.updateWorldInfoList ?? api.updateWorldInfoList)();
@@ -203,12 +235,12 @@ export function createFleetStore(getConversation) {
                 ...structuredClone(api.newWorldInfoEntryTemplate),
                 uid, addMemo: true, ...designEntry(copy, equipment),
             };
-            refreshRoster(book, api.newWorldInfoEntryTemplate);
+            refreshFleetEntries(book, api.newWorldInfoEntryTemplate);
             await writeBook(live, name, book, api);
             let libraryError;
             if (saveDesign) {
                 try {
-                    await saveLibrary(live, [copy, ...allDesigns.filter(other => other.id !== copy.id)]);
+                    await saveLibrary(live, { designs: [copy, ...allDesigns.filter(other => other.id !== copy.id)] });
                 } catch (error) {
                     libraryError = error;
                 }
@@ -227,7 +259,7 @@ export function createFleetStore(getConversation) {
             const entry = fleetEntries(book).find(item => item.sttDesign.id === id);
             if (entry) {
                 delete book.entries[entry.uid];
-                refreshRoster(book, api.newWorldInfoEntryTemplate);
+                refreshFleetEntries(book, api.newWorldInfoEntryTemplate);
                 await writeBook(live, name, book, api);
             }
             return list(book);
@@ -246,5 +278,5 @@ export function createFleetStore(getConversation) {
         }
     }
 
-    return { prepare, activate, retire, library, includeSupplementalLore };
+    return { prepare, activate, retire, library, customEquipment, saveCustomEquipment, includeSupplementalLore };
 }

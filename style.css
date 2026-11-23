@@ -1150,6 +1150,17 @@
     overflow: hidden;
 }
 
+.stt-design-catalog-tools {
+    display: flex;
+    flex: none;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.stt-design-catalog-tools button {
+    flex: none;
+}
+
 .stt-design-chips {
     display: flex;
     flex-wrap: wrap;
@@ -1299,6 +1310,10 @@
     color: var(--stt-blueprint-accent);
 }
 
+.stt-dialog .stt-design-part-actions .stt-custom-edit {
+    width: auto;
+}
+
 .stt-dialog .stt-design-part-actions select {
     width: auto;
     min-height: 31px;
@@ -1321,6 +1336,60 @@
 
 .stt-design-part details p {
     margin-block-start: 5px;
+}
+
+.stt-design-part .stt-custom-effect {
+    white-space: pre-wrap;
+}
+
+.stt-design-custom {
+    flex: 1;
+    min-height: 0;
+    padding: 16px 12px;
+    overflow: auto;
+}
+
+.stt-design-custom form {
+    display: grid;
+    gap: 12px;
+    width: min(100%, 610px);
+    margin: 0 auto;
+    padding: 16px;
+    border: 1px solid #3e697d;
+    border-radius: 8px;
+    background: #0c1e2d;
+}
+
+.stt-design-custom label {
+    display: grid;
+    gap: 4px;
+    color: var(--stt-muted);
+}
+
+.stt-design-custom .stt-custom-budgets {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));
+}
+
+.stt-dialog .stt-design-custom textarea {
+    width: 100%;
+    padding: 7px;
+    border: 1px solid var(--stt-line);
+    border-radius: 5px;
+    background: #0d1928;
+    color: var(--stt-text);
+    font: inherit;
+    resize: vertical;
+}
+
+.stt-design-custom footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: end;
+    gap: 6px;
+}
+
+.stt-design-custom [data-delete-custom] {
+    margin-inline-end: auto;
 }
 
 .stt-design-setup {
@@ -1508,7 +1577,7 @@
         overflow-y: auto;
     }
 
-    .stt-design-page :is(input, select) {
+    .stt-design-page :is(input, select, textarea) {
         font-size: 16px;
     }
 }
