@@ -1,4 +1,4 @@
-"""Extract ship equipment specifications from the Stellaris V4.0 world book."""
+"""Extract ship equipment specifications from the Stellaris worldbook."""
 import argparse
 import json
 from pathlib import Path
@@ -61,7 +61,7 @@ def equipment(uid, content):
         item["fit"] = "juggernaut"
     elif "泰坦" in mount:
         item["fit"] = "titan"
-    elif family == "天体任务载荷":
+    elif family == "天体任务载荷" and "X" not in item["specs"]:
         item["fit"] = "colossus"
     return item
 

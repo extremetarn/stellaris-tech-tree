@@ -76,19 +76,27 @@ export const HULL_GROUPS = [
 
 export const HULLS = new Map(HULL_GROUPS.flatMap(group => group.hulls.map(hull => [hull.id, hull])));
 
+const X_SLOT_HULLS = new Set([
+    'battleship', 'titan', 'juggernaut', 'colossus', 'star_eater',
+    'civilian_arkship', 'scientific_arkship', 'military_arkship',
+    'stinger', 'behemoth', 'enigma_battlecruiser', 'paradox_titan', 'maze_harbinger', 'cryptic_stinger',
+]);
+
 export function hullAvailable(hull, type) {
     return Boolean(hull && supportsCivilization(hull.tech, type));
 }
 
 export function equipmentFits(part, hull) {
-    switch (part?.fit) {
+    if (!part || !hull) return false;
+    if (Object.hasOwn(part.specs, 'X') && !X_SLOT_HULLS.has(hull.id)) return false;
+    switch (part.fit) {
         case 'fixed': return false;
         case 'bio': return hull.bio;
         case 'mechanical': return !hull.bio;
         case 'titan': return ['titan', 'paradox_titan', 'cryptic_stinger'].includes(hull.id);
         case 'juggernaut': return hull.id === 'juggernaut';
         case 'colossus': return hull.id === 'colossus';
-        default: return Boolean(part);
+        default: return true;
     }
 }
 
@@ -151,6 +159,11 @@ export function designPart(row, equipment) {
     return row.customEquipment ?? equipment.get(row.id);
 }
 
+export function designPartSize(row, part) {
+    // Before X was recorded as a size, the same equipment UIDs used an empty size.
+    return row.size === '' && part?.specs.X ? 'X' : row.size;
+}
+
 export function designUnlockError(design, equipment, research) {
     const hull = HULLS.get(design.hullId);
     if (!hullAvailable(hull, research.civilization)) return '当前文明无法使用这种舰体。';
@@ -172,13 +185,14 @@ export function totalDesign(design, equipment, civilization = DEFAULT_CIVILIZATI
     const errors = [];
     for (const row of design.parts) {
         const part = designPart(row, equipment);
-        const spec = part && Object.hasOwn(part.specs, row.size) ? part.specs[row.size] : null;
+        const size = designPartSize(row, part);
+        const spec = part && Object.hasOwn(part.specs, size) ? part.specs[size] : null;
         const quantity = row.quantity;
         if (!spec || !Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
             errors.push('有舰装规格或数量无效。');
             continue;
         }
-        items.push({ part, size: row.size, quantity, spec });
+        items.push({ part, size, quantity, spec });
         totals.usedLoad += (spec.load ?? 0) * quantity;
         totals.addedLoad += (spec.capacity ?? 0) * quantity;
         totals.usedHeat += (spec.heat ?? 0) * quantity;
@@ -207,7 +221,8 @@ export function designEntry(design, equipment) {
     for (const row of design.parts) {
         const part = designPart(row, equipment);
         const name = part?.name ?? '设备 ' + row.id;
-        lines.push(`- ${name}${row.size ? ' [' + row.size + ']' : ''} ×${row.quantity}`);
+        const size = designPartSize(row, part);
+        lines.push(`- ${name}${size ? ' [' + size + ']' : ''} ×${row.quantity}`);
     }
     return {
         key: [design.name], comment: classLabel(design), content: lines.join('\n'),

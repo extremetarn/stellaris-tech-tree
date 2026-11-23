@@ -1,5 +1,5 @@
 import {
-    classLabel, CUSTOM_EQUIPMENT_GROUP, designPart, designUnlockError, equipmentAvailable, equipmentUnlocked,
+    classLabel, CUSTOM_EQUIPMENT_GROUP, designPart, designPartSize, designUnlockError, equipmentAvailable, equipmentUnlocked,
     hullAvailable, hullUnlocked, HULL_GROUPS, HULLS,
     loadEquipment, makeCustomEquipment, MAX_CLASS_NAME, MAX_EQUIPMENT_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
 } from './ship-model.mjs';
@@ -278,10 +278,11 @@ export function createShipDesigner({ dialog, store, getConversation, getResearch
         for (const [index, row] of design.parts.entries()) {
             const part = designPart(row, equipment);
             if ((part?.category ?? 'device') !== activeSystem) continue;
-            const spec = part?.specs[row.size];
+            const size = designPartSize(row, part);
+            const spec = part?.specs[size];
             const card = element('div', '', 'stt-design-installed-row');
             const info = element('div');
-            const label = (part?.name ?? '无法读取的舰装') + (row.size ? ' · ' + row.size : '');
+            const label = (part?.name ?? '无法读取的舰装') + (size ? ' · ' + size : '');
             info.append(element('strong', label));
             const stats = part ? equipmentReadouts(part, research.effects) : [];
             if (stats.length) appendStatLines(info, stats.filter((stat, index) => index === 0 || stat.source), 'small');
@@ -331,7 +332,7 @@ export function createShipDesigner({ dialog, store, getConversation, getResearch
     }
 
     function addPart(part, size) {
-        const existing = design.parts.find(row => row.id === part.id && row.size === size
+        const existing = design.parts.find(row => row.id === part.id && designPartSize(row, part) === size
             && (!part.custom || JSON.stringify(row.customEquipment) === JSON.stringify(part)));
         if (existing) existing.quantity = Math.min(MAX_QUANTITY, (existing.quantity || 0) + 1);
         else {
@@ -409,7 +410,7 @@ export function createShipDesigner({ dialog, store, getConversation, getResearch
                 edit.setAttribute('aria-label', '编辑' + part.name);
                 actions.append(edit);
             }
-            const add = button('＋', () => addPart(part, size.value), 'stt-icon');
+            const add = button('＋', () => addPart(part, variants.length === 1 ? variants[0][0] : size.value), 'stt-icon');
             add.setAttribute('aria-label', '添加' + part.name);
             actions.append(add);
             card.append(main, actions);
