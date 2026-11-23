@@ -1,3 +1,5 @@
+import { CIVILIZATION_TYPES, DEFAULT_CIVILIZATION, supportsCivilization } from './civilizations.mjs';
+
 export const STORAGE_KEY = 'stellarisTechTree';
 export const SAVE_SCHEMA = 1;
 
@@ -30,8 +32,43 @@ export const STATUS = {
     reference: '档案',
 };
 
-export function indexCatalog(data) {
+function restrictCatalog(data, type) {
+    const available = new Map(data.nodes.filter(node => supportsCivilization(node.id, type))
+        .map(node => [node.id, node]));
+    const requiresAvailable = option => !option.id || available.has(option.id);
+    let previousSize;
+    do {
+        previousSize = available.size;
+        for (const [id, node] of available) {
+            if ((node.derivedFrom && !available.has(node.derivedFrom))
+                || node.requires.some(group => !group.some(requiresAvailable))) {
+                available.delete(id);
+            }
+        }
+    } while (available.size < previousSize);
+
+    const nodes = Array.from(available.values(), node => {
+        const requires = node.requires.map(group => group.filter(requiresAvailable));
+        if (requires.every((group, index) => group.length === node.requires[index].length)) return node;
+        const details = node.details.filter(line => !line.startsWith('各组任选一项：'));
+        return { ...node, requires, details };
+    });
+    const perks = data.perks.filter(perk => supportsCivilization(perk.id, type));
+    const perkIds = new Set(perks.map(perk => perk.id));
+    const routes = new Map(data.ascension.map(route => [route.id, route]));
+    const applicable = route => (!route.parent || applicable(routes.get(route.parent)))
+        && (!route.perks.length || route.perks.some(id => perkIds.has(id)));
+    const ascension = data.ascension.filter(applicable)
+        .map(route => ({ ...route, perks: route.perks.filter(id => perkIds.has(id)) }));
+    return {
+        ...data, nodes, perks, ascension,
+        introIds: data.introIds.filter(id => available.has(id)),
+    };
+}
+
+export function indexCatalog(data, civilizationType) {
     if (data.schema !== 1) throw new Error('科技数据版本不受支持。');
+    if (civilizationType) data = restrictCatalog(data, civilizationType);
     const nodes = new Map(data.nodes.map(node => [node.id, node]));
     const perks = new Map(data.perks.map(perk => [perk.id, perk]));
     const routes = new Map(data.ascension.map(route => [route.id, route]));
@@ -51,7 +88,7 @@ export function indexCatalog(data) {
             children.get(parent).push(node.id);
         }
     }
-    return { data, nodes, perks, routes, views, tierNodes, children };
+    return { data, civilizationType, nodes, perks, routes, views, tierNodes, children };
 }
 
 export function prerequisites(node) {
@@ -118,6 +155,7 @@ export function newProfile(name, source) {
     return {
         id: globalThis.crypto?.randomUUID?.() ?? 'archive-' + Date.now() + '-' + Math.random().toString(36).slice(2),
         name,
+        civilizationType: source?.civilizationType ?? DEFAULT_CIVILIZATION,
         learned: [...(source?.learned ?? [])],
         conditions: [...(source?.conditions ?? [])],
         perks: [...(source?.perks ?? [])],
@@ -144,6 +182,8 @@ export function validateProfile(profile) {
     return {
         id: profile.id,
         name: profile.name.trim(),
+        civilizationType: Object.hasOwn(CIVILIZATION_TYPES, profile.civilizationType)
+            ? profile.civilizationType : DEFAULT_CIVILIZATION,
         learned: readStrings(profile.learned),
         conditions: readStrings(profile.conditions ?? []),
         perks: readStrings(profile.perks ?? []),

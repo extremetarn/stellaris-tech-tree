@@ -223,6 +223,17 @@
     white-space: nowrap;
 }
 
+.stt-profile-actions .stt-civilization-field {
+    display: grid;
+    gap: 4px;
+    padding: 3px 2px 5px;
+    color: var(--stt-muted);
+}
+
+.stt-dialog .stt-profile-actions select {
+    width: 100%;
+}
+
 .stt-tabs {
     display: flex;
     flex: none;

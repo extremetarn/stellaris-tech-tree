@@ -2,11 +2,13 @@ import {
     FIELD_NAMES, STATUS, STORAGE_KEY, VIEWS, appendDraft, connectedNodes, draftForBatch, evaluate,
     externalKey, indexCatalog, newProfile, profileSets, restoreSettings, toggle, validateProfile,
 } from './model.mjs';
+import { CIVILIZATION_TYPES } from './civilizations.mjs';
 import { createGraph } from './graph.mjs';
 
 const NAME = '群星科研台';
 const MAIN_VIEWS = ['INTRO', 'P', 'S', 'E', 'ME', 'G', 'ASC'];
 const STAGES = ['入口', '文明转型', '文明终局'];
+const PROJECT_COLLECTIONS = { node: 'nodes', route: 'routes', perk: 'perks' };
 const GATEWAY_NOTICE = '里程碑已达成 · L 星门权限授予 · 灰风实体化';
 
 function element(tag, text = '', className = '') {
@@ -115,6 +117,7 @@ function buildShell() {
 let dialog;
 let numberOfOpenRequests = 0;
 let initialLoad;
+let catalogData;
 let dataCatalog;
 let settings;
 let chatKey = '';
@@ -148,7 +151,7 @@ function getConversation() {
 }
 
 function syncConversation() {
-    if (!dataCatalog) return;
+    if (!catalogData) return;
     const { context, key } = getConversation();
     chatRevision++;
     if (key !== chatKey) {
@@ -364,8 +367,14 @@ function renderProfiles() {
     }));
     elements.profileSelect.value = settings.activeId;
     elements.profileSelect.disabled = !chatKey;
+    elements.civilizationSelect.value = profile().civilizationType;
+    elements.civilizationSelect.disabled = !chatKey;
     elements.profileMenu.disabled = !chatKey;
     elements.legacyImport.hidden = !chatKey || settings.legacyImported || !legacySettings()?.profiles?.length;
+}
+
+function getProject(kind, id) {
+    return dataCatalog[PROJECT_COLLECTIONS[kind]].get(id);
 }
 
 function searchableText(value) {
@@ -448,6 +457,7 @@ function selectTech(id, locate = false) {
 }
 
 function selectAscension(id, kind) {
+    if (!getProject(kind, id)) return;
     selection = { kind, id };
     elements.inspector.dataset.open = 'true';
     view = 'ASC';
@@ -496,6 +506,30 @@ function renderView() {
 }
 
 function refreshProgress() {
+    const type = profile().civilizationType;
+    if (dataCatalog?.civilizationType !== type) {
+        dataCatalog = indexCatalog(catalogData, type);
+        if (focusId && !dataCatalog.nodes.has(focusId)) {
+            focusId = '';
+            if (view === 'FOCUS') view = 'INTRO';
+        }
+        if (selection && !getProject(selection.kind, selection.id)) {
+            selection = null;
+            elements.inspector.dataset.open = 'false';
+        }
+        for (const [key, { item, kind }] of batchProjects) {
+            const currentItem = getProject(kind, item.id);
+            if (currentItem) batchProjects.set(key, { item: currentItem, kind });
+            else batchProjects.delete(key);
+        }
+        const resultsWereHidden = elements.results.hidden;
+        renderSearch();
+        elements.results.hidden = resultsWereHidden;
+        updateProgress();
+        renderView();
+        renderBatch();
+        return;
+    }
     updateProgress();
     renderBatchLearn();
     renderBoardHeader(visibleNodes());
@@ -516,7 +550,7 @@ function hint(parent, text) {
 function renderAscension() {
     const host = elements.ascension;
     host.replaceChildren();
-    hint(host, dataCatalog.data.definitions.ASC);
+    hint(host, dataCatalog.data.definitions.ASC.split('路线包括')[0]);
     const tabs = element('div', '', 'stt-asc-tabs');
     for (const [key, text] of [['routes', '文明路线'], ['perks', '飞升天赋']]) {
         const btn = button(text, () => {
@@ -757,7 +791,7 @@ function bindShell() {
     const find = selector => dialog.querySelector(selector);
     elements = {
         alert: find('.stt-alert'), search: find('.stt-search input'), results: find('.stt-results'),
-        profileSelect: find('.stt-profile-tools select'), profileMenu: find('.stt-profile-menu'),
+        profileSelect: find('.stt-profile-tools > select'), profileMenu: find('.stt-profile-menu'),
         profileActions: find('.stt-profile-actions'), tabs: find('.stt-tabs'),
         graph: find('.stt-graph'), graphView: find('.stt-graph-view'), graphChecks: find('.stt-graph-checks'),
         graphActions: find('.stt-board-actions'), graphLegend: find('.stt-board-footer'),
@@ -799,6 +833,27 @@ function bindShell() {
     elements.batchFill.addEventListener('click', () => fillDraft([...batchProjects.values()]));
     elements.profileSelect.addEventListener('change', event => changeProfile(event.target.value));
     elements.profileMenu.addEventListener('click', () => setProfileMenu(!profileMenuOpen));
+    const civilizationField = element('div', '', 'stt-civilization-field');
+    const civilizationLabel = element('label', '文明类型');
+    const civilizationSelect = element('select');
+    civilizationSelect.id = 'stt-civilization-type';
+    civilizationLabel.htmlFor = civilizationSelect.id;
+    for (const [id, name] of Object.entries(CIVILIZATION_TYPES)) {
+        const option = element('option', name);
+        option.value = id;
+        civilizationSelect.append(option);
+    }
+    elements.civilizationSelect = civilizationSelect;
+    civilizationField.append(civilizationLabel, civilizationSelect);
+    elements.profileActions.append(civilizationField);
+    civilizationSelect.addEventListener('change', () => {
+        const type = civilizationSelect.value;
+        if (!Object.hasOwn(CIVILIZATION_TYPES, type)) return;
+        if (editConversation(() => { profile().civilizationType = type; })) {
+            setProfileMenu(false);
+            elements.profileMenu.focus({ preventScroll: true });
+        }
+    });
     const file = element('input');
     file.type = 'file';
     file.accept = 'application/json,.json';
@@ -849,11 +904,10 @@ function bindShell() {
 async function loadCatalog() {
     const response = await fetch(new URL('./data/tech-tree.json', import.meta.url));
     if (!response.ok) throw new Error('数据文件无法载入（' + response.status + '）。');
-    const catalog = indexCatalog(await response.json());
+    const data = await response.json();
     graph = createGraph(elements.graph, elements.graphChecks, selectTech, node => batchCheckbox(node, 'node'));
-    dataCatalog = catalog;
+    catalogData = data;
     syncConversation();
-    renderView();
 }
 
 async function openPanel(event) {
