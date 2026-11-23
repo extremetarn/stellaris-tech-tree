@@ -1,5 +1,5 @@
 import {
-    classLabel, customEquipmentEntry, designEntry, DESIGN_SETTINGS, FLEET_LINK, hullAvailable, HULLS,
+    classLabel, customEquipmentEntry, designEntry, designUnlockError, DESIGN_SETTINGS, FLEET_LINK,
     MAX_CLASS_NAME, normalizeName, ROSTER_NAME, totalDesign,
 } from './ship-model.mjs';
 
@@ -54,7 +54,7 @@ function refreshFleetEntries(book, template) {
     }
 }
 
-export function createFleetStore(getConversation) {
+export function createFleetStore(getConversation, getResearch) {
     let pending = Promise.resolve();
     let apiPromise;
 
@@ -206,25 +206,33 @@ export function createFleetStore(getConversation) {
         return enqueue(async () => list((await ensureBook(key)).book));
     }
 
-    function activate(key, design, equipment, civilization, saveDesign) {
+    function activate(key, design, equipment, saveDesign) {
         return enqueue(async () => {
-            const hull = HULLS.get(design.hullId);
             const copy = { ...structuredClone(design), name: normalizeName(design.name) };
             if (!copy.name || copy.name.length > MAX_CLASS_NAME || /[\p{Cc}\p{Cf}{}]/u.test(copy.name)
                 || /^\/.*\/[a-z]*$/iu.test(copy.name)) {
                 throw new Error('请输入 1–48 个字的舰级名。');
             }
-            if (!hullAvailable(hull, civilization)) throw new Error('当前文明无法使用这种舰体。');
             if (!copy.parts.length) throw new Error('请至少配置一件舰装。');
-            const totals = totalDesign(copy, equipment, civilization);
-            if (totals.errors.length) throw new Error(totals.errors.join(' '));
+            function checkRequirements(allDesigns) {
+                const research = getResearch();
+                const saved = saveDesign && allDesigns.find(item => item.id === copy.id);
+                const lock = (saved && designUnlockError(saved, equipment, research))
+                    || designUnlockError(copy, equipment, research);
+                if (lock) throw new Error(lock + '。');
+                const totals = totalDesign(copy, equipment, research.civilization);
+                if (totals.errors.length) throw new Error(totals.errors.join(' '));
+            }
 
+            current(key);
+            checkRequirements(saveDesign ? library() : []);
             const { name, api } = await ensureBook(key);
             const { context } = current(key);
             const book = await lorerequest(context, 'get', { name });
             const live = current(key).context;
             if (book[OWNED_BY] !== key) throw new Error('聊天知识书已变更，请重试。');
             const allDesigns = library();
+            checkRequirements(allDesigns);
             const fold = value => normalizeName(value).toLocaleLowerCase();
             const conflicting = [...list(book), ...(saveDesign ? allDesigns : [])].some(other =>
                 other.id !== copy.id && fold(other.name) === fold(copy.name));

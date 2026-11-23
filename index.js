@@ -3,7 +3,7 @@ import {
     externalKey, indexCatalog, newProfile, profileSets, researchCycles, restoreSettings,
     setResearchCycles, toggle, validateProfile,
 } from './model.mjs';
-import { CIVILIZATION_TYPES } from './civilizations.mjs';
+import { CIVILIZATION_TYPES, DEFAULT_CIVILIZATION } from './civilizations.mjs';
 import { createGraph } from './graph.mjs';
 import { createFleetStore } from './ship-fleet.mjs';
 import { createShipDesigner } from './ship-designer.mjs';
@@ -126,6 +126,7 @@ let numberOfOpenRequests = 0;
 let initialLoad;
 let catalogData;
 let dataCatalog;
+let technologyNames = new Map();
 let settings;
 let chatKey = '';
 let chatRevision = 0;
@@ -142,7 +143,7 @@ let openingButton;
 let noteTimer;
 let elements;
 const batchProjects = new Map();
-const fleetStore = createFleetStore(getConversation);
+const fleetStore = createFleetStore(getConversation, getShipResearch);
 let shipDesigner;
 let fleetRequest;
 
@@ -158,6 +159,15 @@ function getConversation() {
         ? JSON.stringify([groupId ? 'group' : 'character', groupId || character, chatId])
         : '';
     return { context, key };
+}
+
+function getShipResearch() {
+    const current = chatKey && getConversation().key === chatKey ? statusById : undefined;
+    return {
+        civilization: settings ? profile().civilizationType : DEFAULT_CIVILIZATION,
+        unlocked: id => ['learned', 'repeated', 'achieved'].includes(current?.get(id)),
+        name: id => technologyNames.get(id) ?? id,
+    };
 }
 
 function syncFleet() {
@@ -312,6 +322,7 @@ function notice(text, duration = 5500) {
 function updateProgress() {
     progress = profileSets(profile());
     statusById = new Map(Array.from(dataCatalog.nodes, ([id, node]) => [id, evaluate(node, dataCatalog, progress).status]));
+    shipDesigner?.refreshResearch();
 }
 
 function setProfileMenu(open) {
@@ -884,7 +895,7 @@ function bindShell() {
     designOpen.addEventListener('click', () => {
         shipDesigner ??= createShipDesigner({
             dialog, store: fleetStore, getConversation, returnToResearch, element, button,
-            getCivilization: () => settings ? profile().civilizationType : 'regular',
+            getResearch: getShipResearch,
         });
         hideSearch();
         setProfileMenu(false);
@@ -983,6 +994,7 @@ async function loadCatalog() {
     if (!response.ok) throw new Error('数据文件无法载入（' + response.status + '）。');
     const data = await response.json();
     graph = createGraph(elements.graph, elements.graphChecks, selectTech, node => batchCheckbox(node, 'node'));
+    technologyNames = new Map(data.nodes.map(node => [node.id, node.name]));
     catalogData = data;
     syncConversation();
 }

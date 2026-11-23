@@ -1499,6 +1499,15 @@
     margin-block-start: 6px;
 }
 
+.stt-design-library-row.is-locked {
+    border-color: #b86672;
+    background: #321e29;
+}
+
+.stt-design-library-row .stt-design-lock {
+    color: var(--stt-red);
+}
+
 .stt-design-footer {
     display: flex;
     flex: none;

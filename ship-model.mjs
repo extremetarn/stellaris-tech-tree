@@ -15,17 +15,17 @@ export const EQUIPMENT_TYPES = {
 // Hull allowances are design rules, independent of the World Book's per-part allowances.
 export const HULL_GROUPS = [
     ['常规军舰', [
-        ['corvette', '护卫舰', 30, 28],
-        ['frigate', '雷击舰', 36, 32],
-        ['destroyer', '驱逐舰', 55, 44],
-        ['cruiser', '巡洋舰', 90, 68],
-        ['battleship', '战列舰', 150, 100],
+        ['corvette', '护卫舰', 30, 28, 'corvettes'],
+        ['frigate', '雷击舰', 36, 32, null],
+        ['destroyer', '驱逐舰', 55, 44, 'destroyers'],
+        ['cruiser', '巡洋舰', 90, 68, 'cruisers'],
+        ['battleship', '战列舰', 150, 100, 'battleships'],
     ]],
     ['大型舰', [
-        ['titan', '泰坦', 210, 145],
+        ['titan', '泰坦', 210, 145, 'titans'],
         ['juggernaut', '主宰', 320, 230],
         ['colossus', '巨像', 275, 185],
-        ['star_eater', '噬星舰', 370, 260],
+        ['star_eater', '噬星舰', 370, 260, null],
     ]],
     ['方舟', [
         ['civilian_arkship', '民用方舟', 170, 125, 'civilian_arkship'],
@@ -33,26 +33,26 @@ export const HULL_GROUPS = [
         ['military_arkship', '军用方舟', 250, 185, 'military_arkship'],
     ]],
     ['生物舰', [
-        ['mauler', '颚蚁', 35, 32, 'mauler', true],
-        ['weaver', '织蛛', 58, 46, 'weaver', true],
-        ['harbinger', '孵后', 105, 80, 'harbinger', true],
-        ['stinger', '刺蜂', 155, 108, 'stinger', true],
+        ['mauler', '颚蚁', 35, 32, 'maulers', true],
+        ['weaver', '织蛛', 58, 46, 'weavers', true],
+        ['harbinger', '孵后', 105, 80, 'harbingers', true],
+        ['stinger', '刺蜂', 155, 108, 'stingers', true],
         ['behemoth', '巨兽', 360, 245, null, true],
     ]],
     ['特种舰', [
-        ['riddle_escort', '密语护航舰', 68, 54],
-        ['enigma_battlecruiser', '神秘战巡舰', 185, 125],
-        ['paradox_titan', '悖论泰坦舰', 295, 195],
-        ['cipher_mauler', '密文颚蚁', 68, 54, null, true],
-        ['quandary_weaver', '困境织蛛', 100, 76, null, true],
-        ['maze_harbinger', '迷宫孵后', 185, 125, null, true],
-        ['cryptic_stinger', '神秘刺蜂', 295, 195, null, true],
+        ['riddle_escort', '密语护航舰', 68, 54, 'cosmogenesis_escort'],
+        ['enigma_battlecruiser', '神秘战巡舰', 185, 125, 'cosmogenesis_battlecruiser'],
+        ['paradox_titan', '悖论泰坦舰', 295, 195, 'cosmogenesis_FE_titan'],
+        ['cipher_mauler', '密文颚蚁', 68, 54, 'cosmogenesis_mauler', true],
+        ['quandary_weaver', '困境织蛛', 100, 76, 'cosmogenesis_weaver', true],
+        ['maze_harbinger', '迷宫孵后', 185, 125, 'cosmogenesis_harbinger', true],
+        ['cryptic_stinger', '神秘刺蜂', 295, 195, 'cosmogenesis_stinger', true],
     ]],
     ['民用与支援舰', [
-        ['science_ship', '科研船', 26, 26],
-        ['construction_ship', '工程船', 45, 36],
+        ['science_ship', '科研船', 26, 26, null],
+        ['construction_ship', '工程船', 45, 36, null],
         ['colony_ship', '殖民船', 65, 48, 'colonization_1'],
-        ['transport_ship', '运输舰', 40, 32],
+        ['transport_ship', '运输舰', 40, 32, null],
     ]],
 ].map(([name, rows]) => ({
     name, hulls: rows.map(([id, name, load, heat, tech = id, bio = false]) => ({ id, name, load, heat, tech, bio })),
@@ -79,6 +79,25 @@ export function equipmentFits(part, hull) {
 export function equipmentAvailable(part, hull, civilization) {
     return equipmentFits(part, hull)
         && (!part.research.length || part.research.some(id => supportsCivilization(id, civilization)));
+}
+
+// These secondary links add modes or integration options to existing components.
+const supplementaryResearch = new Set([
+    'torpedoes_1', 'combat_computers_bio_integration', 'hyper_drive_bio_integration', 'sensors_bio_integration',
+]);
+
+function missingEquipmentResearch(part, unlocked) {
+    if (part.custom) return [];
+    const required = part.research.filter((id, index) => index === 0 || !supplementaryResearch.has(id));
+    return required.some(unlocked) ? [] : required;
+}
+
+export function equipmentUnlocked(part, unlocked) {
+    return !missingEquipmentResearch(part, unlocked).length;
+}
+
+export function hullUnlocked(hull, unlocked) {
+    return !hull.tech || unlocked(hull.tech);
 }
 
 function newId() {
@@ -114,6 +133,20 @@ export function makeCustomEquipment({ id, category, name, load, heat, capacity, 
 
 export function designPart(row, equipment) {
     return row.customEquipment ?? equipment.get(row.id);
+}
+
+export function designUnlockError(design, equipment, research) {
+    const hull = HULLS.get(design.hullId);
+    if (!hullAvailable(hull, research.civilization)) return '当前文明无法使用这种舰体。';
+    const missing = new Set();
+    if (!hullUnlocked(hull, research.unlocked)) missing.add(research.name(hull.tech));
+    for (const row of design.parts) {
+        const part = designPart(row, equipment);
+        if (!part) continue;
+        const required = missingEquipmentResearch(part, research.unlocked);
+        if (required.length) missing.add(required.map(research.name).join(' 或 '));
+    }
+    return missing.size ? '尚未掌握 ' + [...missing].join('、') : '';
 }
 
 export function totalDesign(design, equipment, civilization = DEFAULT_CIVILIZATION) {

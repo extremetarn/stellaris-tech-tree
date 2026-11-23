@@ -1,5 +1,6 @@
 import {
-    classLabel, CUSTOM_EQUIPMENT_GROUP, designPart, equipmentAvailable, hullAvailable, HULL_GROUPS, HULLS,
+    classLabel, CUSTOM_EQUIPMENT_GROUP, designPart, designUnlockError, equipmentAvailable, equipmentUnlocked,
+    hullAvailable, hullUnlocked, HULL_GROUPS, HULLS,
     makeCustomEquipment, MAX_CLASS_NAME, MAX_EQUIPMENT_NAME, MAX_QUANTITY, newDesign, normalizeName, specLabel, totalDesign,
 } from './ship-model.mjs';
 import { createBlueprint, equipmentGroup, SHIP_SYSTEMS } from './ship-blueprint.mjs';
@@ -21,7 +22,7 @@ function loadEquipment() {
     return catalogPromise;
 }
 
-export function createShipDesigner({ dialog, store, getConversation, getCivilization, returnToResearch, element, button }) {
+export function createShipDesigner({ dialog, store, getConversation, getResearch, returnToResearch, element, button }) {
     const page = element('section', '', 'stt-design-page');
     page.hidden = true;
     page.innerHTML = `
@@ -134,6 +135,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         input.max = String(MAX_QUANTITY);
     }
     let design = newDesign();
+    let savedDesign;
     let equipment = new Map();
     let catalogLoaded = false;
     let loading = false;
@@ -168,39 +170,47 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
 
     function renderTotals() {
         const hull = HULLS.get(design.hullId);
-        const totals = totalDesign(design, equipment, getCivilization());
+        const research = getResearch();
+        const totals = totalDesign(design, equipment, research.civilization);
         const { key } = getConversation();
         const fleetReady = Boolean(key && fleetKey === key);
-        const available = hullAvailable(hull, getCivilization());
+        const savedLock = savedDesign && designUnlockError(savedDesign, equipment, research);
+        const lock = savedLock || designUnlockError(design, equipment, research);
+        ui.hull.disabled = ui.name.disabled = ui.stage.inert = ui.overlay.inert = Boolean(savedLock);
         ui.session.textContent = fleetReady ? '会话知识书已连接' : key ? '会话知识书待连接' : '未打开会话';
         ui.className.textContent = hull.name + ' · ' + (normalizeName(design.name) || '未命名舰级');
         budget(ui.load, totals.usedLoad, totals.maxLoad);
         ui.load.title = `舰体 ${totals.baseLoad} · 供能 +${totals.addedLoad}`;
         budget(ui.heat, totals.usedHeat, totals.maxHeat);
         ui.heat.title = '已装设备占用散热';
-        ui.validation.textContent = totals.errors[0] || (!available ? '当前文明无法使用这种舰体。'
-            : !key ? '打开会话后即可保存并服役。' : !fleetReady ? '保存时将连接会话知识书。'
+        ui.validation.textContent = lock || totals.errors[0] || (!key ? '打开会话后即可保存并服役。'
+            : !fleetReady ? '保存时将连接会话知识书。'
                 : !design.parts.length ? '点舰体上的波纹点加装设备。'
                     : !normalizeName(design.name) ? '点舰级名称进行命名。' : '');
-        ui.validation.classList.toggle('is-error', Boolean(totals.errors.length || !available));
-        ui.save.disabled = busy || !key || !available || !catalogLoaded || !normalizeName(design.name)
+        ui.validation.classList.toggle('is-error', Boolean(totals.errors.length || lock));
+        ui.save.disabled = busy || !key || Boolean(lock) || !catalogLoaded || !normalizeName(design.name)
             || !design.parts.length || totals.errors.length > 0;
         ui.save.textContent = busy ? '正在保存…' : '保存并服役';
     }
 
     function renderHull() {
-        const type = getCivilization();
+        const research = getResearch();
         const hull = HULLS.get(design.hullId);
         ui.hull.replaceChildren();
         for (const group of HULL_GROUPS) {
-            const allowed = group.hulls.filter(hull => hullAvailable(hull, type));
+            const allowed = group.hulls.filter(hull => hullAvailable(hull, research.civilization));
             if (!allowed.length) continue;
             const groupOption = element('optgroup');
             groupOption.label = group.name;
-            groupOption.append(...allowed.map(hull => option(hull.id, hull.name)));
+            groupOption.append(...allowed.map(hull => {
+                const unlocked = hullUnlocked(hull, research.unlocked);
+                const choice = option(hull.id, hull.name + (unlocked ? '' : '（未解锁）'));
+                choice.disabled = !unlocked;
+                return choice;
+            }));
             ui.hull.append(groupOption);
         }
-        if (!hullAvailable(hull, type)) {
+        if (!hullAvailable(hull, research.civilization)) {
             const unavailable = option(hull.id, hull.name + '（当前文明不可用）');
             unavailable.disabled = true;
             ui.hull.prepend(unavailable);
@@ -242,10 +252,12 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         ui.chips.replaceChildren();
         if (activeSystem) {
             const hull = HULLS.get(design.hullId);
+            const research = getResearch();
             const available = new Set();
             if (catalogLoaded) {
                 for (const part of equipment.values()) {
-                    if (part.category === activeSystem && equipmentAvailable(part, hull, getCivilization())) {
+                    if (part.category === activeSystem && equipmentAvailable(part, hull, research.civilization)
+                        && equipmentUnlocked(part, research.unlocked)) {
                         available.add(equipmentGroup(part));
                     }
                 }
@@ -276,6 +288,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             return;
         }
         const hull = HULLS.get(design.hullId);
+        const research = getResearch();
         for (const [index, row] of design.parts.entries()) {
             const part = designPart(row, equipment);
             if ((part?.category ?? 'device') !== activeSystem) continue;
@@ -286,7 +299,8 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             info.append(element('strong', label));
             const primary = part?.stats[0]?.join(' ');
             info.append(element('small', primary || (spec ? specLabel(spec) : '请重新选择舰装')));
-            if (part && !equipmentAvailable(part, hull, getCivilization())) info.append(element('small', '当前舰体不相容', 'is-error'));
+            if (part && !equipmentAvailable(part, hull, research.civilization)) info.append(element('small', '当前舰体不相容', 'is-error'));
+            else if (part && !equipmentUnlocked(part, research.unlocked)) info.append(element('small', '科技未解锁', 'is-error'));
             const quantity = element('div', '', 'stt-design-quantity');
             quantity.setAttribute('role', 'group');
             quantity.setAttribute('aria-label', label + '数量');
@@ -348,9 +362,11 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         }
         const needle = ui.search.value.normalize('NFKC').trim().toLocaleLowerCase();
         const hull = HULLS.get(design.hullId);
+        const research = getResearch();
         const source = custom ? store.customEquipment() : equipment.values();
         const parts = Array.from(source).filter(part => part.category === activeSystem
-            && (custom || equipmentGroup(part) === activeGroup) && equipmentAvailable(part, hull, getCivilization())
+            && (custom || equipmentGroup(part) === activeGroup) && equipmentAvailable(part, hull, research.civilization)
+            && equipmentUnlocked(part, research.unlocked)
             && (!needle || [part.name, part.english, part.family, part.effect, ...part.stats.flat()]
                 .some(value => value?.normalize('NFKC').toLocaleLowerCase().includes(needle))));
         if (!custom) {
@@ -480,21 +496,29 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
 
     function renderLibrary() {
         const { key } = getConversation();
-        const type = getCivilization();
-        const saved = store.library().filter(item => hullAvailable(HULLS.get(item.hullId), type));
+        const research = getResearch();
+        const saved = store.library().filter(item => HULLS.has(item.hullId));
         ui.designs.replaceChildren();
         for (const item of saved) {
-            const row = libraryRow(item, button('编辑', () => {
+            const lock = catalogLoaded ? designUnlockError(item, equipment, research) : '';
+            const edit = button('编辑', () => {
+                savedDesign = item;
                 design = structuredClone(item);
                 limit = PAGE_SIZE;
                 ui.search.value = '';
                 selectSystem('');
                 message();
                 selectTab('editor');
-            }));
+            });
+            edit.disabled = busy || !key || !catalogLoaded || Boolean(lock);
+            const row = libraryRow(item, edit);
+            if (lock) {
+                row.classList.add('is-locked');
+                row.firstElementChild.append(element('small', '未解锁 · ' + lock, 'stt-design-lock'));
+            }
             const active = fleet.some(ship => ship.id === item.id && JSON.stringify(ship) === JSON.stringify(item));
             const deploy = button(active ? '已服役' : '在本会话服役', () => performActivation(item, false));
-            deploy.disabled = busy || !key || !catalogLoaded || active;
+            deploy.disabled = busy || !key || !catalogLoaded || active || Boolean(lock);
             row.append(deploy);
             ui.designs.append(row);
         }
@@ -535,14 +559,16 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
     }
 
     function performActivation(item, save) {
-        const type = getCivilization();
         const snapshot = structuredClone(item);
-        void act(key => store.activate(key, snapshot, equipment, type, save), result => {
+        void act(key => store.activate(key, snapshot, equipment, save), result => {
             fleet = result.fleet;
-            if (save && design.id === snapshot.id && JSON.stringify(design) === JSON.stringify(snapshot)) {
-                design = result.design;
-                ui.name.value = design.name;
-                renderInstalled();
+            if (save && design.id === snapshot.id) {
+                if (!result.libraryError) savedDesign = result.design;
+                if (JSON.stringify(design) === JSON.stringify(snapshot)) {
+                    design = structuredClone(result.design);
+                    ui.name.value = design.name;
+                    renderInstalled();
+                }
             }
             if (result.libraryError) {
                 message(classLabel(result.design) + ' 已在本会话服役。跨会话设计库保存失败，请再点一次「保存并服役」。', true);
@@ -568,8 +594,7 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
             loading = true;
             equipment = await loadEquipment();
             catalogLoaded = true;
-            renderDesign();
-            if (tab !== 'editor') renderLibrary();
+            refreshResearch();
         } catch (error) {
             message(error.message + '，返回设计台可重试。', true);
         } finally {
@@ -582,10 +607,13 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         fleet = items;
         if (page.hidden) return;
         if (error) message(error.message, true);
-        renderHull();
-        renderSelection();
-        renderTotals();
-        if (tab !== 'editor') renderLibrary();
+        refreshResearch();
+    }
+
+    function refreshResearch() {
+        if (page.hidden) return;
+        if (tab === 'editor') renderDesign();
+        else if (tab === 'library') renderLibrary();
     }
 
     function close() {
@@ -670,7 +698,11 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         renderTotals();
     });
     ui.fresh.addEventListener('click', () => {
-        design = newDesign(hullAvailable(HULLS.get(design.hullId), getCivilization()) ? design.hullId : 'corvette');
+        const hull = HULLS.get(design.hullId);
+        const research = getResearch();
+        const keepHull = hullAvailable(hull, research.civilization) && hullUnlocked(hull, research.unlocked);
+        design = newDesign(keepHull ? hull.id : 'corvette');
+        savedDesign = undefined;
         message();
         renderDesign();
         ui.name.focus();
@@ -682,5 +714,5 @@ export function createShipDesigner({ dialog, store, getConversation, getCiviliza
         blueprint.requestLayout();
     });
     ui.save.addEventListener('click', () => performActivation(design, true));
-    return { open, setFleet, close, get visible() { return !page.hidden; } };
+    return { open, setFleet, refreshResearch, close, get visible() { return !page.hidden; } };
 }
