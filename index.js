@@ -4,6 +4,8 @@ import {
 } from './model.mjs';
 import { CIVILIZATION_TYPES } from './civilizations.mjs';
 import { createGraph } from './graph.mjs';
+import { createFleetStore } from './ship-fleet.mjs';
+import { createShipDesigner } from './ship-designer.mjs';
 
 const NAME = '群星科研台';
 const MAIN_VIEWS = ['INTRO', 'P', 'S', 'E', 'ME', 'G', 'ASC'];
@@ -65,7 +67,10 @@ function buildShell() {
                 </div>
                 <button type="button" class="stt-close stt-icon" aria-label="关闭科研台">×</button>
             </header>
-            <nav class="stt-tabs" aria-label="科技分类"></nav>
+            <div class="stt-navigation">
+                <nav class="stt-tabs" aria-label="科技分类"></nav>
+                <button type="button" class="stt-design-open">舰船设计器</button>
+            </div>
             <div class="stt-alert" role="status" hidden></div>
             <div class="stt-main">
                 <section class="stt-board" aria-label="科技图">
@@ -135,6 +140,9 @@ let openingButton;
 let noteTimer;
 let elements;
 const batchProjects = new Map();
+const fleetStore = createFleetStore(getConversation);
+let shipDesigner;
+let fleetRequest;
 
 function profile() {
     return settings.profiles.find(item => item.id === settings.activeId);
@@ -148,6 +156,28 @@ function getConversation() {
         ? JSON.stringify([groupId ? 'group' : 'character', groupId || character, chatId])
         : '';
     return { context, key };
+}
+
+function syncFleet() {
+    const { key } = getConversation();
+    if (fleetRequest?.key === key) return fleetRequest.promise;
+    shipDesigner?.setFleet('', []);
+    const request = { key };
+    request.promise = fleetStore.prepare(key)
+        .then(fleet => {
+            if (getConversation().key === key) shipDesigner?.setFleet(key, fleet);
+        })
+        .catch(error => {
+            if (getConversation().key === key) {
+                shipDesigner?.setFleet(key, [], error);
+                console.warn(NAME, error);
+            }
+        })
+        .finally(() => {
+            if (fleetRequest === request) fleetRequest = undefined;
+        });
+    fleetRequest = request;
+    return request.promise;
 }
 
 function syncConversation() {
@@ -817,6 +847,28 @@ function bindShell() {
         }
         renderView();
     });
+    const designOpen = find('.stt-design-open');
+    const researchShell = find('.stt-shell');
+    const returnToResearch = () => {
+        researchShell.hidden = false;
+        dialog.setAttribute('aria-labelledby', 'stt-title');
+        if (dialog.open) {
+            graph?.resize();
+            designOpen.focus({ preventScroll: true });
+        }
+    };
+    designOpen.addEventListener('click', () => {
+        shipDesigner ??= createShipDesigner({
+            dialog, store: fleetStore, getConversation, returnToResearch, element, button,
+            getCivilization: () => settings ? profile().civilizationType : 'regular',
+        });
+        hideSearch();
+        setProfileMenu(false);
+        researchShell.hidden = true;
+        dialog.setAttribute('aria-labelledby', 'stt-design-heading');
+        void shipDesigner.open();
+        void syncFleet();
+    });
     find('.stt-close').addEventListener('click', () => dialog.close());
     find('.stt-hide-detail').addEventListener('click', () => {
         elements.inspector.dataset.open = 'false';
@@ -895,6 +947,7 @@ function bindShell() {
         if (!event.target.closest('.stt-profile-tools')) setProfileMenu(false);
     });
     dialog.addEventListener('close', () => {
+        if (shipDesigner?.visible) shipDesigner.close();
         hideSearch();
         setProfileMenu(false);
         if (dialog.returnValue !== 'draft') openingButton?.focus();
@@ -942,7 +995,21 @@ async function openPanel(event) {
 
 function mount() {
     const { eventSource, eventTypes } = globalThis.SillyTavern.getContext();
-    eventSource.on(eventTypes.CHAT_CHANGED, syncConversation);
+    eventSource.on(eventTypes.CHAT_CHANGED, () => {
+        syncConversation();
+        return syncFleet();
+    });
+    if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, syncFleet);
+    if (eventTypes.WORLDINFO_ENTRIES_LOADED) {
+        eventSource.on(eventTypes.WORLDINFO_ENTRIES_LOADED, async sources => {
+            try {
+                await fleetStore.includeSupplementalLore(sources);
+            } catch (error) {
+                console.warn(NAME, error);
+            }
+        });
+    }
+    void syncFleet();
     const menu = document.getElementById('extensionsMenu');
     const settingsArea = document.getElementById('extensions_settings2') ?? document.getElementById('extensions_settings');
     if (menu && !document.getElementById('stt-open-menu')) {

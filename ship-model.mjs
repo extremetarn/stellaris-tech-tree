@@ -1,0 +1,142 @@
+import { DEFAULT_CIVILIZATION, supportsCivilization } from './civilizations.mjs';
+
+export const DESIGN_SETTINGS = 'stellarisShipDesigns';
+export const FLEET_LINK = 'stellarisChatFleet';
+export const ROSTER_NAME = '当前服役舰船列表';
+export const MAX_CLASS_NAME = 48;
+export const MAX_QUANTITY = 9999;
+
+export const EQUIPMENT_TYPES = {
+    power: '供能', weapon: '武器', armor: '装甲', shield: '护盾', device: '设备',
+};
+
+// Hull allowances are design rules, independent of the World Book's per-part allowances.
+export const HULL_GROUPS = [
+    ['常规军舰', [
+        ['corvette', '护卫舰', 30, 28],
+        ['frigate', '雷击舰', 36, 32],
+        ['destroyer', '驱逐舰', 55, 44],
+        ['cruiser', '巡洋舰', 90, 68],
+        ['battleship', '战列舰', 150, 100],
+    ]],
+    ['大型舰', [
+        ['titan', '泰坦', 210, 145],
+        ['juggernaut', '主宰', 320, 230],
+        ['colossus', '巨像', 275, 185],
+        ['star_eater', '噬星舰', 370, 260],
+    ]],
+    ['方舟', [
+        ['civilian_arkship', '民用方舟', 170, 125, 'civilian_arkship'],
+        ['scientific_arkship', '科研方舟', 200, 145, 'science_arkship'],
+        ['military_arkship', '军用方舟', 250, 185, 'military_arkship'],
+    ]],
+    ['生物舰', [
+        ['mauler', '颚蚁', 35, 32, 'mauler', true],
+        ['weaver', '织蛛', 58, 46, 'weaver', true],
+        ['harbinger', '孵后', 105, 80, 'harbinger', true],
+        ['stinger', '刺蜂', 155, 108, 'stinger', true],
+        ['behemoth', '巨兽', 360, 245, null, true],
+    ]],
+    ['特种舰', [
+        ['riddle_escort', '密语护航舰', 68, 54],
+        ['enigma_battlecruiser', '神秘战巡舰', 185, 125],
+        ['paradox_titan', '悖论泰坦舰', 295, 195],
+        ['cipher_mauler', '密文颚蚁', 68, 54, null, true],
+        ['quandary_weaver', '困境织蛛', 100, 76, null, true],
+        ['maze_harbinger', '迷宫孵后', 185, 125, null, true],
+        ['cryptic_stinger', '神秘刺蜂', 295, 195, null, true],
+    ]],
+    ['民用与支援舰', [
+        ['science_ship', '科研船', 26, 26],
+        ['construction_ship', '工程船', 45, 36],
+        ['colony_ship', '殖民船', 65, 48, 'colonization_1'],
+        ['transport_ship', '运输舰', 40, 32],
+    ]],
+].map(([name, rows]) => ({
+    name, hulls: rows.map(([id, name, load, heat, tech = id, bio = false]) => ({ id, name, load, heat, tech, bio })),
+}));
+
+export const HULLS = new Map(HULL_GROUPS.flatMap(group => group.hulls.map(hull => [hull.id, hull])));
+
+export function hullAvailable(hull, type) {
+    return Boolean(hull && supportsCivilization(hull.tech, type));
+}
+
+export function equipmentFits(part, hull) {
+    switch (part?.fit) {
+        case 'fixed': return false;
+        case 'bio': return hull.bio;
+        case 'mechanical': return !hull.bio;
+        case 'titan': return ['titan', 'paradox_titan', 'cryptic_stinger'].includes(hull.id);
+        case 'juggernaut': return hull.id === 'juggernaut';
+        case 'colossus': return hull.id === 'colossus';
+        default: return Boolean(part);
+    }
+}
+
+export function equipmentAvailable(part, hull, civilization) {
+    return equipmentFits(part, hull)
+        && (!part.research.length || part.research.some(id => supportsCivilization(id, civilization)));
+}
+
+export function newDesign(hullId = 'corvette') {
+    return {
+        id: Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''),
+        hullId, name: '', parts: [],
+    };
+}
+
+export function normalizeName(name) {
+    return String(name ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ');
+}
+
+export function totalDesign(design, equipment, civilization = DEFAULT_CIVILIZATION) {
+    const hull = HULLS.get(design.hullId);
+    const totals = { usedLoad: 0, baseLoad: hull?.load ?? 0, addedLoad: 0, usedHeat: 0, maxHeat: hull?.heat ?? 0 };
+    const items = [];
+    const errors = [];
+    for (const row of design.parts) {
+        const part = equipment.get(row.id);
+        const spec = part && Object.hasOwn(part.specs, row.size) ? part.specs[row.size] : null;
+        const quantity = row.quantity;
+        if (!spec || !Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
+            errors.push('有舰装规格或数量无效。');
+            continue;
+        }
+        items.push({ part, size: row.size, quantity, spec });
+        totals.usedLoad += (spec.load ?? 0) * quantity;
+        totals.addedLoad += (spec.capacity ?? 0) * quantity;
+        totals.usedHeat += (spec.heat ?? 0) * quantity;
+        if (!hull || !equipmentAvailable(part, hull, civilization)) errors.push(`${part.name}与当前舰体不相容。`);
+    }
+    totals.maxLoad = totals.baseLoad + totals.addedLoad;
+    if (totals.usedLoad > totals.maxLoad) errors.push('舰装超过负载额度。');
+    if (totals.usedHeat > totals.maxHeat) errors.push('供能设备超过散热额度。');
+    return { ...totals, items, errors: [...new Set(errors)] };
+}
+
+export function classLabel(design) {
+    return `${HULLS.get(design.hullId)?.name ?? '舰船'}-${design.name}`;
+}
+
+export function specLabel(spec) {
+    return spec.capacity == null ? `负载 ${spec.load}` : `负载上限 +${spec.capacity} · 散热 ${spec.heat}`;
+}
+
+export function designEntry(design, equipment) {
+    const totals = totalDesign(design, equipment);
+    const lines = [
+        `【${classLabel(design)}】`,
+        `舰种 ${HULLS.get(design.hullId).name} · 舰级 ${design.name} · 当前会话服役`,
+        `负载 ${totals.usedLoad}／${totals.maxLoad}（舰体 ${totals.baseLoad}，供能 +${totals.addedLoad}） · 散热 ${totals.usedHeat}／${totals.maxHeat}`,
+    ];
+    for (const { part, size, quantity, spec } of totals.items) {
+        const stats = part.stats.map(([label, value]) => `${label} ${value}`).join(' · ');
+        const note = stats || (part.category === 'device' ? part.effect.split('。', 1)[0] : '');
+        lines.push(`- ${part.name}${size ? ' [' + size + ']' : ''} ×${quantity}（${specLabel(spec)}）${note ? ' · ' + note : ''}`);
+    }
+    return {
+        key: [design.name], comment: classLabel(design), content: lines.join('\n'),
+        constant: false, matchWholeWords: false, excludeRecursion: true, sttDesign: structuredClone(design),
+    };
+}
